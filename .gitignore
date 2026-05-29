@@ -1,0 +1,28 @@
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+*.log
+.env
+.env.*
+!.env.example
+
+# App data & secrets — never commit
+data/
+certs/
+
+# Test artifacts
+playwright-report/
+test-results/
+*.tmp
+.tmp/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Local Claude Code settings (personal)
+.claude/settings.local.json

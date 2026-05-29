@@ -1,0 +1,25 @@
+services:
+  aegis:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aegis-grc:latest
+    container_name: aegis-grc
+    restart: unless-stopped
+    ports:
+      - '8443:8443'
+    environment:
+      # All optional — these are the defaults baked into the image.
+      PORT: 8443
+      IDLE_TIMEOUT_MIN: 30
+      NODE_ENV: production
+    volumes:
+      # The ONE encrypted file lives here: ./data/aegis.db
+      - ./data:/data
+      # Mount a real cert here (fullchain.pem + privkey.pem) to avoid self-signed.
+      - ./certs:/certs
+    # Drop all Linux capabilities; the app needs none.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

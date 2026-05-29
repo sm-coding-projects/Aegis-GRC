@@ -1,0 +1,82 @@
+/*
+ * Aegis GRC design tokens — "Refined institutional" (CLAUDE.md §7).
+ * All values are HSL channels so Tailwind can wrap them in hsl(var(--x) / <a>).
+ * Light + dark are a pure variable swap. Components reference tokens, never hex.
+ * Contrast pairings verified for WCAG AA (see VALIDATION notes).
+ */
+
+:root,
+[data-theme='light'] {
+  /* Neutrals — cool slate ramp */
+  --bg: 210 20% 98%;
+  --surface: 0 0% 100%;
+  --surface-2: 210 20% 96%;
+  --border: 214 18% 88%;
+  --input: 214 16% 82%;
+  --text: 215 28% 14%;
+  --text-muted: 215 14% 40%;
+  --ring: 188 78% 32%;
+
+  /* Accent — serious deep teal (the 10% in the 60/30/10 rule) */
+  --accent: 188 80% 30%;
+  --accent-fg: 0 0% 100%;
+  --accent-hover: 188 82% 24%;
+
+  /* Semantic status palette — always paired with label + icon, never color alone */
+  --status-implemented: 152 58% 32%;
+  --status-implemented-bg: 152 48% 92%;
+  --status-progress: 33 90% 38%;
+  --status-progress-bg: 38 90% 90%;
+  --status-notstarted: 215 16% 38%;
+  --status-notstarted-bg: 215 18% 92%;
+  --status-na: 220 8% 46%;
+  --status-na-bg: 220 12% 94%;
+  --status-overdue: 0 72% 42%;
+  --status-overdue-bg: 0 78% 95%;
+
+  --destructive: 0 72% 44%;
+  --destructive-fg: 0 0% 100%;
+
+  --radius: 8px;
+
+  /* Elevation — soft, low-spread (§7.5) */
+  --elev-1: 0 1px 2px 0 hsl(215 25% 15% / 0.06), 0 1px 3px 0 hsl(215 25% 15% / 0.05);
+  --elev-2: 0 2px 4px -1px hsl(215 25% 15% / 0.08), 0 4px 8px -2px hsl(215 25% 15% / 0.06);
+  --elev-3: 0 8px 16px -4px hsl(215 25% 15% / 0.12), 0 12px 28px -8px hsl(215 25% 15% / 0.10);
+}
+
+[data-theme='dark'] {
+  /* Dark slate base — not pure black; elevated surfaces get lighter (§7.4) */
+  --bg: 222 28% 9%;
+  --surface: 222 22% 12%;
+  --surface-2: 222 18% 16%;
+  --border: 222 14% 24%;
+  --input: 222 14% 26%;
+  --text: 210 22% 92%;
+  --text-muted: 215 15% 64%;
+  --ring: 186 62% 48%;
+
+  /* Accent slightly desaturated/lighter so it doesn't vibrate on dark */
+  --accent: 186 62% 46%;
+  --accent-fg: 222 32% 8%;
+  --accent-hover: 186 64% 54%;
+
+  --status-implemented: 152 52% 60%;
+  --status-implemented-bg: 152 38% 17%;
+  --status-progress: 40 88% 62%;
+  --status-progress-bg: 38 50% 17%;
+  --status-notstarted: 215 14% 70%;
+  --status-notstarted-bg: 215 14% 22%;
+  --status-na: 220 8% 62%;
+  --status-na-bg: 220 10% 20%;
+  --status-overdue: 0 78% 70%;
+  --status-overdue-bg: 0 45% 22%;
+
+  --destructive: 0 70% 58%;
+  --destructive-fg: 0 0% 100%;
+
+  /* In dark, lean on surface lightness for elevation; keep shadows subtle */
+  --elev-1: 0 1px 2px 0 hsl(0 0% 0% / 0.30);
+  --elev-2: 0 2px 6px -1px hsl(0 0% 0% / 0.40);
+  --elev-3: 0 10px 24px -6px hsl(0 0% 0% / 0.55);
+}

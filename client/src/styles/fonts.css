@@ -1,0 +1,5 @@
+/*
+ * Self-hosted IBM Plex (§7.1) — @font-face declarations are populated in
+ * Phase 5 once the woff2 files are vendored into /public/fonts. Until then the
+ * Tailwind font stack falls back to system-ui so the build has no external dep.
+ */

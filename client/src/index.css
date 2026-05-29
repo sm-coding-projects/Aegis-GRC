@@ -1,0 +1,45 @@
+@import './styles/tokens.css';
+@import './styles/fonts.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    font-feature-settings: 'cv05' 1; /* IBM Plex: single-storey a, cleaner */
+  }
+
+  body {
+    @apply bg-bg text-text font-sans antialiased;
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+
+  /* Visible focus ring everywhere keyboard users land (§7.6, §7.12) */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-bg;
+  }
+
+  /* Monospace for control IDs, dates, counts (§7.1) */
+  .font-data {
+    @apply font-mono tabular-nums;
+  }
+
+  /* Respect reduced motion (§7.10) */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

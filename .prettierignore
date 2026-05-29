@@ -1,0 +1,8 @@
+node_modules
+dist
+build
+coverage
+playwright-report
+test-results
+package-lock.json
+server/src/db/seed/iso27001-2022-annex-a-controls.json
