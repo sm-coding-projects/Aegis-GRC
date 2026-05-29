@@ -180,22 +180,50 @@ export const controlListQuerySchema = z
 export type ControlListQuery = z.infer<typeof controlListQuerySchema>;
 
 /* ------------------------------------------------------------------ *
- * Evidence
+ * Evidence library (engagement-scoped, M:N linked to controls)
  * ------------------------------------------------------------------ */
+
+/** A starter palette of evidence tags; users may also enter their own. */
+export const SUGGESTED_EVIDENCE_TAGS = [
+  'technical',
+  'process',
+  'policy',
+  'vendor',
+  'test-result',
+  'screenshot',
+] as const;
+
+/** A single tag: short, free-form, trimmed. */
+export const evidenceTagSchema = z.string().trim().min(1).max(40);
+
+/** A set of tags; capped, de-duplicated by the server. Optional everywhere. */
+export const evidenceTagsSchema = z.array(evidenceTagSchema).max(20);
+
+/** List of control row ids to link a piece of evidence to (M:N). */
+const controlRowIdsSchema = z.array(z.number().int().positive()).max(200);
+
+const evidenceCommon = {
+  label: trimmedNonEmpty(200),
+  tags: evidenceTagsSchema.optional(),
+  /** Expiry date; evidence past this is flagged stale. Empty/null = never expires. */
+  expires_at: isoDateSchema.optional(),
+  /** Optionally link to these control rows on create. */
+  control_row_ids: controlRowIdsSchema.optional(),
+};
 
 export const evidenceLinkSchema = z
   .object({
     kind: z.literal('link'),
-    label: trimmedNonEmpty(200),
     url: z.string().trim().url('Must be a valid URL').max(2000),
+    ...evidenceCommon,
   })
   .strict();
 
 export const evidenceNoteSchema = z
   .object({
     kind: z.literal('note'),
-    label: trimmedNonEmpty(200),
     text: trimmedNonEmpty(8000),
+    ...evidenceCommon,
   })
   .strict();
 
@@ -206,16 +234,63 @@ export const evidenceCreateSchema = z.discriminatedUnion('kind', [
 ]);
 export type EvidenceCreateInput = z.infer<typeof evidenceCreateSchema>;
 
+/** Patch an existing library item: rename, retag, or refresh/expire. */
+export const evidenceUpdateSchema = z
+  .object({
+    label: trimmedNonEmpty(200).optional(),
+    tags: evidenceTagsSchema.optional(),
+    expires_at: isoDateSchema.optional(),
+  })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update' });
+export type EvidenceUpdateInput = z.infer<typeof evidenceUpdateSchema>;
+
+/** Link an existing library item to one more control row. */
+export const evidenceLinkControlSchema = z
+  .object({ control_row_id: z.number().int().positive() })
+  .strict();
+export type EvidenceLinkControlInput = z.infer<typeof evidenceLinkControlSchema>;
+
+/** Filters for the evidence library list. */
+export const evidenceListQuerySchema = z
+  .object({
+    search: z.string().trim().max(200).optional(),
+    tag: evidenceTagSchema.optional(),
+    kind: z.enum(EVIDENCE_KINDS).optional(),
+    /** active = not expired; stale = expired; all = everything. */
+    status: z.enum(['active', 'stale', 'all']).optional(),
+  })
+  .strict();
+export type EvidenceListQuery = z.infer<typeof evidenceListQuerySchema>;
+
+/** A short reference to a control a piece of evidence is linked to. */
+export interface EvidenceControlRef {
+  control_row_id: number;
+  control_id: string; // e.g. "A.8.24"
+  title: string;
+}
+
 export interface Evidence {
   id: number;
-  control_row_id: number;
+  client_id: number;
   kind: EvidenceKind;
   label: string;
   url: string | null;
   text: string | null;
   mime: string | null;
   size: number | null;
+  tags: string[];
+  expires_at: string | null;
   created_at: string;
+  updated_at: string;
+  /** Derived: expires_at is set AND in the past. */
+  expired: boolean;
+  /** Number of controls this evidence is linked to. */
+  linked_control_count: number;
+  /** Populated on the single-item / control-scoped views; omitted in big lists. */
+  linked_controls?: EvidenceControlRef[];
+  /** True when this image evidence can be shown as a thumbnail/preview. */
+  previewable: boolean;
 }
 
 /* ------------------------------------------------------------------ *

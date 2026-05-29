@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
   ShieldCheck,
+  FolderOpen,
   ScrollText,
   Settings,
   Shield,
@@ -27,6 +28,7 @@ import {
 const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/controls', label: 'Controls', icon: ShieldCheck },
+  { to: '/evidence', label: 'Evidence', icon: FolderOpen },
   { to: '/reports', label: 'Reports', icon: ScrollText },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];

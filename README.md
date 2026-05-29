@@ -39,6 +39,11 @@ all your data (including uploaded evidence files) is right there.
 - 🎨 **Polished, professional UI** — self-hosted IBM Plex, restrained slate
   palette with one accent, dashboard with charts, filterable controls table, and
   a detail drawer for editing controls + managing evidence.
+- 🗂️ **Evidence library** — a per-engagement, searchable store of evidence
+  (links, notes, uploaded files) you **tag** (`technical`, `policy`, `vendor`…),
+  **link many-to-many** to controls (one SOC 2 report can satisfy ten controls),
+  give an **expiry date** so stale evidence is surfaced and refreshed, and
+  **preview** (image thumbnails) or download without leaving the page.
 - 📜 **Immutable audit trail** — every change to a control, evidence item, or
   engagement is recorded with timestamp, actor, IP, and a field-level
   before→after diff. The log is append-only (enforced by database triggers) and
@@ -198,6 +203,7 @@ for phase-by-phase validation evidence (including the migration drill transcript
 
 ## Scope (v1)
 
-Controls tracking + per-client SoA + dashboard + immutable audit trail.
-Intentionally **not** in v1 (clean extension points left, not built): multi-user /
-RBAC, cloud sync, external auth, telemetry, risk/asset registers.
+Controls tracking + per-client SoA + dashboard + evidence library + immutable
+audit trail. Intentionally **not** in v1 (clean extension points left, not
+built): multi-user / RBAC, cloud sync, external auth, telemetry, risk/asset
+registers.

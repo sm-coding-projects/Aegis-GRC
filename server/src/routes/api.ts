@@ -6,6 +6,9 @@ import {
   controlUpdateSchema,
   controlListQuerySchema,
   evidenceCreateSchema,
+  evidenceUpdateSchema,
+  evidenceLinkControlSchema,
+  evidenceListQuerySchema,
   auditListQuerySchema,
 } from '@aegis/shared';
 import type { AppContext } from '../auth/context';
@@ -19,11 +22,17 @@ import {
 } from '../db/clients';
 import { listControls, getControl, updateControl, listOwners } from '../db/controls';
 import {
-  listEvidence,
-  addLinkOrNote,
-  addFile,
-  getEvidenceBlob,
+  listLibrary,
+  getEvidenceForClient,
+  listForControl,
+  listTags,
+  createLinkOrNote,
+  createFile,
+  updateEvidence,
   deleteEvidence,
+  linkControl,
+  unlinkControl,
+  getEvidenceBlob,
 } from '../db/evidence';
 import { dashboardSummary } from '../db/dashboard';
 import { recordAudit, listAudit, allAudit } from '../db/audit';
@@ -124,7 +133,21 @@ export function makeApiRouter(ctx: AppContext): Router {
     res.json(control);
   });
 
-  /* -------------------------------- Evidence ------------------------------ */
+  /* --------------------------- Evidence library --------------------------- */
+
+  // Guard: the named client must exist; returns its id or null (after responding).
+  function resolveClient(req: Request, res: Response): number | null {
+    const id = intParam(req.params.clientId);
+    if (!id) {
+      badRequest(res);
+      return null;
+    }
+    if (!getClient(req.db!, id)) {
+      res.status(404).json({ error: 'Client not found' });
+      return null;
+    }
+    return id;
+  }
 
   // Guard: the control row must exist and belong to the named client.
   function resolveControl(req: Request, res: Response): { clientId: number; controlRowId: number } | null {
@@ -141,15 +164,157 @@ export function makeApiRouter(ctx: AppContext): Router {
     return { clientId, controlRowId };
   }
 
+  /** Parse multipart text fields (tags / control_row_ids JSON, expires_at) into typed values. */
+  function parseFileMeta(body: Record<string, unknown>): {
+    tags?: string[];
+    expires_at?: string | null;
+    control_row_ids?: number[];
+  } {
+    const out: { tags?: string[]; expires_at?: string | null; control_row_ids?: number[] } = {};
+    if (typeof body.tags === 'string' && body.tags.trim() !== '') {
+      try {
+        const v = JSON.parse(body.tags);
+        if (Array.isArray(v)) out.tags = v.filter((x) => typeof x === 'string').slice(0, 20);
+      } catch {
+        /* ignore malformed tags */
+      }
+    }
+    if (typeof body.expires_at === 'string' && body.expires_at.trim() !== '') {
+      out.expires_at = body.expires_at.trim();
+    }
+    if (typeof body.control_row_ids === 'string' && body.control_row_ids.trim() !== '') {
+      try {
+        const v = JSON.parse(body.control_row_ids);
+        if (Array.isArray(v)) out.control_row_ids = v.filter((n) => Number.isInteger(n) && n > 0).slice(0, 200);
+      } catch {
+        /* ignore */
+      }
+    }
+    return out;
+  }
+
+  // List the engagement's library (search / tag / kind / status filters).
+  router.get('/clients/:clientId/evidence', (req: Request, res: Response) => {
+    const id = resolveClient(req, res);
+    if (!id) return;
+    const parsed = evidenceListQuerySchema.safeParse(req.query);
+    if (!parsed.success) return badRequest(res, parsed.error.flatten());
+    res.json(listLibrary(req.db!, id, parsed.data));
+  });
+
+  // Distinct tags in this library (for the filter dropdown).
+  router.get('/clients/:clientId/evidence/tags', (req: Request, res: Response) => {
+    const id = resolveClient(req, res);
+    if (!id) return;
+    res.json(listTags(req.db!, id));
+  });
+
+  // Create a link/note library item (optionally pre-linked via control_row_ids).
+  router.post('/clients/:clientId/evidence', (req: Request, res: Response) => {
+    const id = resolveClient(req, res);
+    if (!id) return;
+    const parsed = evidenceCreateSchema.safeParse(req.body);
+    if (!parsed.success) return badRequest(res, parsed.error.flatten());
+    res.status(201).json(createLinkOrNote(req.db!, id, parsed.data));
+  });
+
+  // Upload a file into the library (blob stored in the encrypted DB).
+  router.post(
+    '/clients/:clientId/evidence/file',
+    evidenceUpload.single('file'),
+    (req: Request, res: Response) => {
+      const id = resolveClient(req, res);
+      if (!id) return;
+      const file = (req as Request & { file?: Express.Multer.File }).file;
+      if (!file || file.size === 0) return badRequest(res, 'No file uploaded');
+      const label =
+        typeof req.body.label === 'string' && req.body.label.trim() !== ''
+          ? req.body.label.trim().slice(0, 200)
+          : file.originalname.slice(0, 200);
+      const meta = parseFileMeta(req.body);
+      res.status(201).json(
+        createFile(req.db!, id, {
+          label,
+          buffer: file.buffer,
+          mime: file.mimetype || 'application/octet-stream',
+          ...meta,
+        }),
+      );
+    },
+  );
+
+  // A single library item with its linked controls.
+  router.get('/clients/:clientId/evidence/:eid', (req: Request, res: Response) => {
+    const id = resolveClient(req, res);
+    if (!id) return;
+    const eid = intParam(req.params.eid);
+    if (!eid) return badRequest(res);
+    const ev = getEvidenceForClient(req.db!, id, eid);
+    if (!ev) return void res.status(404).json({ error: 'Evidence not found' });
+    res.json(ev);
+  });
+
+  // Update (rename / retag / refresh expiry).
+  router.patch('/clients/:clientId/evidence/:eid', (req: Request, res: Response) => {
+    const id = resolveClient(req, res);
+    if (!id) return;
+    const eid = intParam(req.params.eid);
+    if (!eid) return badRequest(res);
+    const parsed = evidenceUpdateSchema.safeParse(req.body);
+    if (!parsed.success) return badRequest(res, parsed.error.flatten());
+    const ev = updateEvidence(req.db!, id, eid, parsed.data);
+    if (!ev) return void res.status(404).json({ error: 'Evidence not found' });
+    res.json(ev);
+  });
+
+  // Delete from the library (cascades its links).
+  router.delete('/clients/:clientId/evidence/:eid', (req: Request, res: Response) => {
+    const id = resolveClient(req, res);
+    if (!id) return;
+    const eid = intParam(req.params.eid);
+    if (!eid) return badRequest(res);
+    if (!deleteEvidence(req.db!, id, eid))
+      return void res.status(404).json({ error: 'Evidence not found' });
+    res.json({ ok: true });
+  });
+
+  // Link an existing library item to a control row.
+  router.post('/clients/:clientId/evidence/:eid/links', (req: Request, res: Response) => {
+    const id = resolveClient(req, res);
+    if (!id) return;
+    const eid = intParam(req.params.eid);
+    if (!eid) return badRequest(res);
+    const parsed = evidenceLinkControlSchema.safeParse(req.body);
+    if (!parsed.success) return badRequest(res, parsed.error.flatten());
+    const ev = linkControl(req.db!, id, eid, parsed.data.control_row_id);
+    if (!ev) return void res.status(404).json({ error: 'Evidence or control not found' });
+    res.json(ev);
+  });
+
+  // Unlink a library item from a control row (the item stays in the library).
+  router.delete('/clients/:clientId/evidence/:eid/links/:rowId', (req: Request, res: Response) => {
+    const id = resolveClient(req, res);
+    if (!id) return;
+    const eid = intParam(req.params.eid);
+    const rowId = intParam(req.params.rowId);
+    if (!eid || !rowId) return badRequest(res);
+    const ev = unlinkControl(req.db!, id, eid, rowId);
+    if (!ev) return void res.status(404).json({ error: 'Evidence not found' });
+    res.json(ev);
+  });
+
+  /* ----------------------- Evidence linked to a control ------------------- */
+
   router.get(
     '/clients/:clientId/controls/:controlRowId/evidence',
     (req: Request, res: Response) => {
       const r = resolveControl(req, res);
       if (!r) return;
-      res.json(listEvidence(req.db!, r.controlRowId));
+      res.json(listForControl(req.db!, r.controlRowId));
     },
   );
 
+  // Convenience: create a link/note already linked to this control.
   router.post(
     '/clients/:clientId/controls/:controlRowId/evidence',
     (req: Request, res: Response) => {
@@ -157,10 +322,12 @@ export function makeApiRouter(ctx: AppContext): Router {
       if (!r) return;
       const parsed = evidenceCreateSchema.safeParse(req.body);
       if (!parsed.success) return badRequest(res, parsed.error.flatten());
-      res.status(201).json(addLinkOrNote(req.db!, r.controlRowId, parsed.data));
+      const data = { ...parsed.data, control_row_ids: [r.controlRowId] };
+      res.status(201).json(createLinkOrNote(req.db!, r.clientId, data));
     },
   );
 
+  // Convenience: upload a file already linked to this control.
   router.post(
     '/clients/:clientId/controls/:controlRowId/evidence/file',
     evidenceUpload.single('file'),
@@ -169,17 +336,24 @@ export function makeApiRouter(ctx: AppContext): Router {
       if (!r) return;
       const file = (req as Request & { file?: Express.Multer.File }).file;
       if (!file || file.size === 0) return badRequest(res, 'No file uploaded');
-      const label = typeof req.body.label === 'string' && req.body.label.trim() !== ''
-        ? req.body.label.trim().slice(0, 200)
-        : file.originalname.slice(0, 200);
-      const ev = addFile(req.db!, r.controlRowId, {
-        label,
-        buffer: file.buffer,
-        mime: file.mimetype || 'application/octet-stream',
-      });
-      res.status(201).json(ev);
+      const label =
+        typeof req.body.label === 'string' && req.body.label.trim() !== ''
+          ? req.body.label.trim().slice(0, 200)
+          : file.originalname.slice(0, 200);
+      const meta = parseFileMeta(req.body);
+      res.status(201).json(
+        createFile(req.db!, r.clientId, {
+          label,
+          buffer: file.buffer,
+          mime: file.mimetype || 'application/octet-stream',
+          ...meta,
+          control_row_ids: [r.controlRowId, ...(meta.control_row_ids ?? [])],
+        }),
+      );
     },
   );
+
+  /* --------------------------- Evidence download -------------------------- */
 
   router.get('/evidence/:id/download', (req: Request, res: Response) => {
     const id = intParam(req.params.id);
@@ -187,18 +361,13 @@ export function makeApiRouter(ctx: AppContext): Router {
     const blob = getEvidenceBlob(req.db!, id);
     if (!blob) return void res.status(404).json({ error: 'File evidence not found' });
     res.setHeader('Content-Type', blob.mime);
+    // `?view=1` serves inline (for previewing in a tab); default forces download.
+    const disposition = req.query.view ? 'inline' : 'attachment';
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${blob.label.replace(/[^\w.-]+/g, '_')}"`,
+      `${disposition}; filename="${blob.label.replace(/[^\w.-]+/g, '_')}"`,
     );
     res.send(blob.blob);
-  });
-
-  router.delete('/evidence/:id', (req: Request, res: Response) => {
-    const id = intParam(req.params.id);
-    if (!id) return badRequest(res);
-    if (!deleteEvidence(req.db!, id)) return void res.status(404).json({ error: 'Evidence not found' });
-    res.json({ ok: true });
   });
 
   /* ------------------------------- Dashboard ------------------------------ */

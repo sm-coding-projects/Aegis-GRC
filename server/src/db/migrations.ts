@@ -120,15 +120,77 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    name: 'evidence library (M:N) + tags + expiry',
+    up: (db) => {
+      // Evidence moves from a per-control row (1:N) to an engagement-level
+      // LIBRARY (client-scoped) that links MANY-to-MANY to control rows. We also
+      // add tags + an expiry date so stale evidence can be surfaced/refreshed.
+      //
+      // SQLite table rebuild: rename the old table, create the new shape, copy
+      // data (deriving client_id from each piece's control), seed one link per
+      // existing piece, then drop the old table. evidence_links is created AFTER
+      // the new evidence table so its FK resolves to the rebuilt table.
+      db.exec(`
+        ALTER TABLE evidence RENAME TO evidence_old;
+
+        CREATE TABLE evidence (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          client_id   INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+          kind        TEXT NOT NULL CHECK (kind IN ('link','note','file')),
+          label       TEXT NOT NULL,
+          url         TEXT,
+          text        TEXT,
+          blob        BLOB,
+          mime        TEXT,
+          size        INTEGER,
+          tags        TEXT,        -- JSON array of strings, e.g. ["technical","policy"]
+          expires_at  TEXT,        -- YYYY-MM-DD or NULL (no expiry)
+          created_at  TEXT NOT NULL,
+          updated_at  TEXT NOT NULL
+        );
+
+        INSERT INTO evidence
+          (id, client_id, kind, label, url, text, blob, mime, size, tags, expires_at, created_at, updated_at)
+        SELECT e.id, c.client_id, e.kind, e.label, e.url, e.text, e.blob, e.mime, e.size,
+               NULL, NULL, e.created_at, e.created_at
+        FROM evidence_old e
+        JOIN controls c ON c.id = e.control_row_id;
+
+        CREATE TABLE evidence_links (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          evidence_id    INTEGER NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+          control_row_id INTEGER NOT NULL REFERENCES controls(id) ON DELETE CASCADE,
+          created_at     TEXT NOT NULL,
+          UNIQUE (evidence_id, control_row_id)
+        );
+
+        INSERT INTO evidence_links (evidence_id, control_row_id, created_at)
+        SELECT e.id, e.control_row_id, e.created_at FROM evidence_old e;
+
+        DROP TABLE evidence_old;
+
+        CREATE INDEX idx_evidence_client       ON evidence (client_id);
+        CREATE INDEX idx_evidence_expires       ON evidence (expires_at);
+        CREATE INDEX idx_evlinks_evidence       ON evidence_links (evidence_id);
+        CREATE INDEX idx_evlinks_control        ON evidence_links (control_row_id);
+      `);
+    },
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = migrations[migrations.length - 1]!.version;
 
-/** Apply all pending migrations. Returns the resulting schema version. */
-export function migrate(db: DB): number {
+/**
+ * Apply pending migrations up to `target` (default: all). Returns the resulting
+ * schema version. `target` exists so tests can build an old-schema DB and then
+ * exercise a later migration's data upgrade in isolation.
+ */
+export function migrate(db: DB, target: number = LATEST_SCHEMA_VERSION): number {
   let current = Number(db.pragma('user_version', { simple: true }));
   for (const m of migrations) {
-    if (m.version > current) {
+    if (m.version > current && m.version <= target) {
       const run = db.transaction(() => {
         m.up(db);
         db.pragma(`user_version = ${m.version}`);
