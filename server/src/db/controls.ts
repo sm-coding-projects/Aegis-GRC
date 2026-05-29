@@ -106,28 +106,36 @@ export function updateControl(
 
   const sets: string[] = [];
   const params: Record<string, unknown> = { id: controlRowId, now: nowIso() };
+  // Field-level diff for the audit trail: only fields whose value actually changed.
+  const before: Record<string, unknown> = {};
+  const after: Record<string, unknown> = {};
+  const existingRecord = existing as unknown as Record<string, unknown>;
   for (const key of UPDATABLE) {
     if (key in patch && patch[key] !== undefined) {
-      let value: unknown = patch[key];
-      if (key === 'applicable') value = value ? 1 : 0;
+      const newValue = (patch[key] ?? null) as unknown;
+      const oldValue = existingRecord[key] ?? null;
+      if (oldValue === newValue) continue; // no-op field, don't log it
+      let stored: unknown = newValue;
+      if (key === 'applicable') stored = newValue ? 1 : 0;
       sets.push(`${key} = @${key}`);
-      params[key] = value ?? null;
+      params[key] = stored;
+      before[key] = oldValue;
+      after[key] = newValue;
     }
   }
   if (sets.length === 0) return existing;
 
   db.prepare(`UPDATE controls SET ${sets.join(', ')}, updated_at = @now WHERE id = @id`).run(params);
 
-  // Build a concise audit summary of what changed.
-  const changes = Object.keys(patch)
-    .filter((k) => UPDATABLE.includes(k as keyof ControlUpdateInput))
-    .join(', ');
+  const changes = Object.keys(after).join(', ');
   recordAudit(db, {
     action: 'update',
     entity: 'control',
     entity_id: existing.control_id,
     client_id: clientId,
     summary: `Updated ${existing.control_id} (${changes})`,
+    before,
+    after,
   });
 
   return getControl(db, clientId, controlRowId);

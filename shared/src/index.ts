@@ -252,17 +252,60 @@ export interface DashboardSummary {
 }
 
 /* ------------------------------------------------------------------ *
- * Audit log (append-only)
+ * Audit log (append-only, immutable)
  * ------------------------------------------------------------------ */
 
+/**
+ * An immutable audit-trail row. ISO 27001 (and most compliance frameworks)
+ * require a defensible record of who changed what, when. Rows are append-only:
+ * the database enforces this with triggers that reject UPDATE/DELETE.
+ *
+ * Field map vs. the canonical (timestamp, user_id, action, control_id, before,
+ * after, ip) tuple:
+ *   timestamp → at · user_id → actor · action → action · control_id → entity_id
+ *   before/after → before/after · ip → ip
+ *
+ * `before`/`after` are JSON object strings (or null) describing the changed
+ * fields — old values in `before`, new values in `after`.
+ */
 export interface AuditEntry {
   id: number;
   at: string;
   action: string;
   entity: string;
+  /** For control entities this is the control_id (e.g. "A.8.24"); otherwise the row id. */
   entity_id: string | null;
   client_id: number | null;
   summary: string;
+  /** JSON object string of changed fields' prior values, or null. */
+  before: string | null;
+  /** JSON object string of changed fields' new values, or null. */
+  after: string | null;
+  /** Originating request IP, or null when not request-scoped. */
+  ip: string | null;
+  /** Operator/session identifier responsible for the action. */
+  actor: string | null;
+}
+
+/** Query params for paging/filtering the audit trail. */
+export const auditListQuerySchema = z
+  .object({
+    action: z.string().trim().max(40).optional(),
+    entity: z.string().trim().max(40).optional(),
+    /** Filter to a single entity (e.g. a control_id like "A.8.24"). */
+    entity_id: z.string().trim().max(64).optional(),
+    limit: z.coerce.number().int().min(1).max(500).optional(),
+    offset: z.coerce.number().int().min(0).optional(),
+  })
+  .strict();
+export type AuditListQuery = z.infer<typeof auditListQuerySchema>;
+
+/** A page of audit entries plus the unfiltered-by-page total (for pagination). */
+export interface AuditPage {
+  entries: AuditEntry[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 /* ------------------------------------------------------------------ *

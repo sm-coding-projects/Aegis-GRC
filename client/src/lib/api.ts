@@ -17,6 +17,7 @@ import type {
   Evidence,
   EvidenceCreateInput,
   DashboardSummary,
+  AuditPage,
 } from '@aegis/shared';
 
 let csrfToken: string | null = null;
@@ -179,4 +180,37 @@ export const dashboardApi = {
 export const exportApi = {
   csvUrl: (clientId: number) => `/api/clients/${clientId}/export.csv`,
   backupUrl: () => '/api/backup',
+};
+
+/* --------------------------------- Audit --------------------------------- */
+
+interface AuditQuery {
+  action?: string;
+  entity?: string;
+  entity_id?: string;
+  limit?: number;
+  offset?: number;
+}
+
+function auditQs(query: AuditQuery): string {
+  const params = new URLSearchParams();
+  if (query.action) params.set('action', query.action);
+  if (query.entity) params.set('entity', query.entity);
+  if (query.entity_id) params.set('entity_id', query.entity_id);
+  if (query.limit != null) params.set('limit', String(query.limit));
+  if (query.offset != null) params.set('offset', String(query.offset));
+  const s = params.toString();
+  return s ? `?${s}` : '';
+}
+
+export const auditApi = {
+  /** Paged audit trail. Omit clientId for the cross-engagement trail. */
+  list: (clientId: number | null, query: AuditQuery = {}) =>
+    req<AuditPage>(
+      `/api${clientId != null ? `/clients/${clientId}` : ''}/audit${auditQs(query)}`,
+    ),
+  csvUrl: (clientId: number | null) =>
+    clientId != null ? `/api/clients/${clientId}/audit/export.csv` : '/api/audit/export.csv',
+  jsonUrl: (clientId: number | null) =>
+    clientId != null ? `/api/clients/${clientId}/audit/export.json` : '/api/audit/export.json',
 };

@@ -6,6 +6,7 @@ import {
   controlUpdateSchema,
   controlListQuerySchema,
   evidenceCreateSchema,
+  auditListQuerySchema,
 } from '@aegis/shared';
 import type { AppContext } from '../auth/context';
 import { config } from '../config';
@@ -25,9 +26,9 @@ import {
   deleteEvidence,
 } from '../db/evidence';
 import { dashboardSummary } from '../db/dashboard';
-import { recordAudit } from '../db/audit';
+import { recordAudit, listAudit, allAudit } from '../db/audit';
 import { checkpoint } from '../db/crypto-db';
-import { controlsToCsv } from '../util/csv';
+import { controlsToCsv, auditToCsv } from '../util/csv';
 import { todayIso } from '../util/now';
 
 function badRequest(res: Response, details?: unknown): void {
@@ -231,6 +232,74 @@ export function makeApiRouter(ctx: AppContext): Router {
       summary: `Exported SoA CSV for "${client.name}"`,
     });
     res.send(csv);
+  });
+
+  /* ------------------------------ Audit trail ----------------------------- */
+
+  // Shared helpers so the per-client and global trail behave identically.
+  function sendAuditExport(
+    req: Request,
+    res: Response,
+    clientId: number | undefined,
+    format: 'csv' | 'json',
+    filenameStem: string,
+  ): void {
+    const entries = allAudit(req.db!, clientId);
+    recordAudit(req.db!, {
+      action: 'export',
+      entity: 'audit',
+      entity_id: clientId ?? null,
+      client_id: clientId ?? null,
+      summary: `Exported audit trail (${format.toUpperCase()}${
+        clientId ? `, client ${clientId}` : ', all engagements'
+      })`,
+    });
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filenameStem}-${todayIso()}.csv"`);
+      res.send(auditToCsv(entries));
+    } else {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filenameStem}-${todayIso()}.json"`);
+      res.send(JSON.stringify({ exported_at: new Date().toISOString(), entries }, null, 2));
+    }
+  }
+
+  // Global trail (all engagements) — export routes registered before the list.
+  router.get('/audit/export.csv', (req: Request, res: Response) => {
+    sendAuditExport(req, res, undefined, 'csv', 'audit-trail');
+  });
+  router.get('/audit/export.json', (req: Request, res: Response) => {
+    sendAuditExport(req, res, undefined, 'json', 'audit-trail');
+  });
+  router.get('/audit', (req: Request, res: Response) => {
+    const parsed = auditListQuerySchema.safeParse(req.query);
+    if (!parsed.success) return badRequest(res, parsed.error.flatten());
+    res.json(listAudit(req.db!, parsed.data));
+  });
+
+  // Per-client trail.
+  router.get('/clients/:clientId/audit/export.csv', (req: Request, res: Response) => {
+    const id = intParam(req.params.clientId);
+    if (!id) return badRequest(res);
+    const client = getClient(req.db!, id);
+    if (!client) return void res.status(404).json({ error: 'Client not found' });
+    sendAuditExport(req, res, id, 'csv', `audit-${client.name.replace(/[^\w.-]+/g, '_')}`);
+  });
+  router.get('/clients/:clientId/audit/export.json', (req: Request, res: Response) => {
+    const id = intParam(req.params.clientId);
+    if (!id) return badRequest(res);
+    const client = getClient(req.db!, id);
+    if (!client) return void res.status(404).json({ error: 'Client not found' });
+    sendAuditExport(req, res, id, 'json', `audit-${client.name.replace(/[^\w.-]+/g, '_')}`);
+  });
+  router.get('/clients/:clientId/audit', (req: Request, res: Response) => {
+    const id = intParam(req.params.clientId);
+    if (!id) return badRequest(res);
+    if (!getClient(req.db!, id)) return void res.status(404).json({ error: 'Client not found' });
+    const parsed = auditListQuerySchema.safeParse(req.query);
+    if (!parsed.success) return badRequest(res, parsed.error.flatten());
+    res.json(listAudit(req.db!, parsed.data, id));
   });
 
   /* --------------------------- Encrypted backup --------------------------- */

@@ -186,6 +186,58 @@ describe('phase 4 — API', () => {
     ).toBe(true);
   });
 
+  it('audit trail: records before/after + actor/ip, lists, filters, and exports CSV/JSON', async () => {
+    const id = await makeClient('Audited LLC');
+    const rowId = (await agent.get(`/api/clients/${id}/controls`)).body[0].id as number;
+    const controlId = (await agent.get(`/api/clients/${id}/controls`)).body[0].control_id as string;
+
+    await mutate('patch', `/api/clients/${id}/controls/${rowId}`)
+      .send({ status: 'implemented', owner: 'Jane Auditor' })
+      .expect(200);
+
+    // Per-client paged trail.
+    const page = await agent.get(`/api/clients/${id}/audit`).expect(200);
+    expect(page.body.total).toBeGreaterThanOrEqual(2); // create client + update control
+    expect(typeof page.body.limit).toBe('number');
+
+    const updateEntry = (page.body.entries as Array<Record<string, unknown>>).find(
+      (e) => e.action === 'update' && e.entity === 'control',
+    )!;
+    expect(updateEntry).toBeTruthy();
+    expect(updateEntry.entity_id).toBe(controlId);
+    expect(updateEntry.actor).toMatch(/^op-/); // session-derived actor
+    expect(updateEntry.ip).toBeTruthy(); // captured from the request
+    const after = JSON.parse(updateEntry.after as string);
+    expect(after.status).toBe('implemented');
+    expect(after.owner).toBe('Jane Auditor');
+
+    // Filter by action.
+    const onlyUpdates = await agent
+      .get(`/api/clients/${id}/audit?action=update&entity=control`)
+      .expect(200);
+    expect(
+      (onlyUpdates.body.entries as Array<{ action: string }>).every((e) => e.action === 'update'),
+    ).toBe(true);
+
+    // CSV export.
+    const csv = await agent.get(`/api/clients/${id}/audit/export.csv`).expect(200);
+    expect(csv.headers['content-type']).toMatch(/text\/csv/);
+    expect(csv.headers['content-disposition']).toMatch(/audit-Audited_LLC-.*\.csv/);
+    expect(csv.text.split('\r\n')[0]).toContain('Before');
+
+    // JSON export.
+    const json = await agent.get(`/api/clients/${id}/audit/export.json`).expect(200);
+    expect(json.headers['content-type']).toMatch(/application\/json/);
+    expect(Array.isArray(json.body.entries)).toBe(true);
+
+    // Global trail spans engagements.
+    const globalTrail = await agent.get('/api/audit').expect(200);
+    expect(globalTrail.body.total).toBeGreaterThanOrEqual(page.body.total);
+
+    // Rejects unknown query fields (strict zod).
+    await agent.get(`/api/clients/${id}/audit?bogus=1`).expect(400);
+  });
+
   it('backup downloads an encrypted file that re-opens with the password and has the data', async () => {
     const id = await makeClient('Backup Target');
     // Add a control update + evidence so there is data to verify post-restore.

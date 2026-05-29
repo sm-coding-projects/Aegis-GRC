@@ -39,6 +39,11 @@ all your data (including uploaded evidence files) is right there.
 - 🎨 **Polished, professional UI** — self-hosted IBM Plex, restrained slate
   palette with one accent, dashboard with charts, filterable controls table, and
   a detail drawer for editing controls + managing evidence.
+- 📜 **Immutable audit trail** — every change to a control, evidence item, or
+  engagement is recorded with timestamp, actor, IP, and a field-level
+  before→after diff. The log is append-only (enforced by database triggers) and
+  exportable to CSV/JSON from the **Reports** page — the evidence ISO 27001
+  expects of *who changed what, when*.
 
 > ⚠️ **There is no password recovery.** The password is the encryption key — by
 > design, losing it means the data is unrecoverable. Keep it safe and keep backups.
@@ -154,6 +159,8 @@ All optional (see `.env.example`); defaults are baked into the image.
   mutations; bootstrap auth routes require a custom `X-Requested-With` header.
 - **Brute force:** unlock route rate-limited (5 / 15 min / IP) with generic errors.
 - **Headers:** `helmet` + HSTS + strict CSP (no inline scripts).
+- **Audit trail:** append-only `audit_log`, immutability enforced by SQLite
+  triggers (UPDATE/DELETE rejected); session secrets are never written to it.
 - **Container:** non-root, all Linux capabilities dropped, `no-new-privileges`;
   `data/`, `certs/`, and `.env` are excluded from the image.
 
@@ -191,6 +198,6 @@ for phase-by-phase validation evidence (including the migration drill transcript
 
 ## Scope (v1)
 
-Controls tracking + per-client SoA + dashboard. Intentionally **not** in v1 (clean
-extension points left, not built): multi-user / RBAC, cloud sync, external auth,
-telemetry, risk/asset registers.
+Controls tracking + per-client SoA + dashboard + immutable audit trail.
+Intentionally **not** in v1 (clean extension points left, not built): multi-user /
+RBAC, cloud sync, external auth, telemetry, risk/asset registers.
