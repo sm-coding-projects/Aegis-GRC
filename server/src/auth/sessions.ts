@@ -3,6 +3,12 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 export interface Session {
   id: string;
   csrfToken: string;
+  /**
+   * Short, non-sensitive identifier for this login session, used as the audit
+   * `actor`. Deliberately NOT the session id or CSRF token (which are secrets
+   * that must never leak into an exported audit trail).
+   */
+  actorId: string;
   createdAt: number;
   lastActivity: number;
 }
@@ -20,6 +26,7 @@ export class SessionStore {
     const session: Session = {
       id: randomBytes(32).toString('hex'),
       csrfToken: randomBytes(32).toString('hex'),
+      actorId: `op-${randomBytes(4).toString('hex')}`,
       createdAt: now,
       lastActivity: now,
     };

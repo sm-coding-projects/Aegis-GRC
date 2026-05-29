@@ -71,6 +71,13 @@ export function addLinkOrNote(
     entity_id: Number(res.lastInsertRowid),
     client_id: clientId ?? null,
     summary: `Added ${input.kind} evidence "${input.label}" to ${controlIdOf(db, controlRowId)}`,
+    after: {
+      kind: input.kind,
+      label: input.label,
+      url: input.kind === 'link' ? input.url : null,
+      text: input.kind === 'note' ? input.text : null,
+      control: controlIdOf(db, controlRowId),
+    },
   });
   return getEvidence(db, Number(res.lastInsertRowid))!;
 }
@@ -101,6 +108,13 @@ export function addFile(
     entity_id: Number(res.lastInsertRowid),
     client_id: clientId ?? null,
     summary: `Uploaded file "${file.label}" (${file.buffer.length} bytes) to ${controlIdOf(db, controlRowId)}`,
+    after: {
+      kind: 'file',
+      label: file.label,
+      mime: file.mime,
+      size: file.buffer.length,
+      control: controlIdOf(db, controlRowId),
+    },
   });
   return getEvidence(db, Number(res.lastInsertRowid))!;
 }
@@ -137,6 +151,13 @@ export function deleteEvidence(db: DB, id: number): boolean {
     entity_id: id,
     client_id: clientId ?? null,
     summary: `Deleted ${existing.kind} evidence "${existing.label}"`,
+    before: {
+      kind: existing.kind,
+      label: existing.label,
+      url: existing.url,
+      mime: existing.mime,
+      size: existing.size,
+    },
   });
   return true;
 }

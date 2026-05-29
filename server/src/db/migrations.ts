@@ -85,6 +85,41 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    name: 'enrich + harden audit trail',
+    up: (db) => {
+      // Enrich the audit trail toward the canonical compliance tuple:
+      // (timestamp, user_id, action, control_id, before, after, ip).
+      //   before/after → JSON of the changed fields' old/new values
+      //   ip           → originating request IP
+      //   actor        → operator/session identifier (the single-user "user_id")
+      db.exec(`
+        ALTER TABLE audit_log ADD COLUMN before TEXT;
+        ALTER TABLE audit_log ADD COLUMN after  TEXT;
+        ALTER TABLE audit_log ADD COLUMN ip     TEXT;
+        ALTER TABLE audit_log ADD COLUMN actor  TEXT;
+
+        CREATE INDEX idx_audit_action ON audit_log (action);
+        CREATE INDEX idx_audit_entity ON audit_log (entity);
+
+        -- Enforce immutability at the database level, not just by convention.
+        -- The audit trail is evidence; the application must never be able to
+        -- rewrite or erase history.
+        CREATE TRIGGER trg_audit_no_update
+          BEFORE UPDATE ON audit_log
+        BEGIN
+          SELECT RAISE(ABORT, 'audit_log is append-only (immutable)');
+        END;
+
+        CREATE TRIGGER trg_audit_no_delete
+          BEFORE DELETE ON audit_log
+        BEGIN
+          SELECT RAISE(ABORT, 'audit_log is append-only (immutable)');
+        END;
+      `);
+    },
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = migrations[migrations.length - 1]!.version;

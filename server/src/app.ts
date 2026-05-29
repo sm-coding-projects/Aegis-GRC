@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import { AppContext, type ContextOptions } from './auth/context';
 import { makeAuthRouter } from './auth/routes';
 import { makeAttachSession, requireUnlocked, requireCsrf } from './auth/middleware';
+import { auditScopeMiddleware } from './auth/audit-context';
 import { makeApiRouter } from './routes/api';
 import { config } from './config';
 import { log } from './util/logger';
@@ -78,7 +79,9 @@ export function createApp(options: CreateAppOptions = {}): CreatedApp {
     res.json({ unlocked: true, csrfToken: req.session!.csrfToken });
   });
   api.use(makeApiRouter(context));
-  app.use('/api', requireUnlocked, requireCsrf, api);
+  // auditScopeMiddleware runs after requireUnlocked (so req.session is present)
+  // and establishes the per-request (ip, actor) context that recordAudit reads.
+  app.use('/api', requireUnlocked, requireCsrf, auditScopeMiddleware, api);
 
   // JSON 404 for unknown API routes.
   app.use('/api', (_req: Request, res: Response) => {

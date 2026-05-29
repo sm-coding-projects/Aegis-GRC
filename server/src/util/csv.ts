@@ -1,4 +1,4 @@
-import type { ControlRow } from '@aegis/shared';
+import type { ControlRow, AuditEntry } from '@aegis/shared';
 import { STATUS_LABELS } from '@aegis/shared';
 
 /** RFC-4180-ish CSV cell escaping. */
@@ -47,5 +47,42 @@ export function controlsToCsv(controls: ControlRow[]): string {
     );
   }
   // Excel-friendly CRLF line endings.
+  return lines.join('\r\n');
+}
+
+const AUDIT_HEADERS = [
+  'Timestamp (UTC)',
+  'Actor',
+  'IP',
+  'Action',
+  'Entity',
+  'Entity ID',
+  'Client ID',
+  'Summary',
+  'Before',
+  'After',
+];
+
+/** Render the audit trail as CSV text (one row per entry, oldest → newest). */
+export function auditToCsv(entries: AuditEntry[]): string {
+  const lines = [AUDIT_HEADERS.map(cell).join(',')];
+  for (const e of entries) {
+    lines.push(
+      [
+        e.at,
+        e.actor,
+        e.ip,
+        e.action,
+        e.entity,
+        e.entity_id,
+        e.client_id,
+        e.summary,
+        e.before,
+        e.after,
+      ]
+        .map(cell)
+        .join(','),
+    );
+  }
   return lines.join('\r\n');
 }

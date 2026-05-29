@@ -35,6 +35,7 @@ export function createClient(db: DB, input: ClientCreateInput): Client {
       entity_id: clientId,
       client_id: clientId,
       summary: `Created engagement "${input.name}" and seeded ${count} controls`,
+      after: { name: input.name, description: input.description ?? null },
     });
     return clientId;
   });
@@ -74,6 +75,8 @@ export function updateClient(db: DB, id: number, input: ClientUpdateInput): Clie
     entity_id: id,
     client_id: id,
     summary: `Updated engagement "${next.name}"`,
+    before: { name: existing.name, description: existing.description },
+    after: { name: next.name, description: next.description },
   });
   return getClient(db, id);
 }
@@ -89,6 +92,7 @@ export function deleteClient(db: DB, id: number): boolean {
     entity_id: id,
     client_id: null,
     summary: `Deleted engagement "${existing.name}"`,
+    before: { name: existing.name, description: existing.description },
   });
   return true;
 }

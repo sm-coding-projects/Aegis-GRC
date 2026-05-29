@@ -3,10 +3,10 @@ import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { X, Link2, FileText, File, Download, Trash2, Plus } from 'lucide-react';
+import { X, Link2, FileText, File, Download, Trash2, Plus, History, ArrowRight } from 'lucide-react';
 import { controlUpdateSchema, STATUS_LABELS, STATUSES } from '@aegis/shared';
-import type { ControlRow, ControlUpdateInput, Evidence } from '@aegis/shared';
-import { controlsApi, evidenceApi, ApiError } from '@/lib/api';
+import type { ControlRow, ControlUpdateInput, Evidence, AuditEntry, AuditPage } from '@aegis/shared';
+import { controlsApi, evidenceApi, auditApi, ApiError } from '@/lib/api';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -109,6 +109,7 @@ function DrawerContent({
           old?.map((c) => (c.id === updated.id ? updated : c)) ?? [updated],
       );
       await queryClient.invalidateQueries({ queryKey: ['dashboard', clientId] });
+      await queryClient.invalidateQueries({ queryKey: ['audit'] });
       toast.success('Control updated.');
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Update failed.';
@@ -259,6 +260,11 @@ function DrawerContent({
         {/* Evidence section */}
         <div className="mt-6 border-t border-border pt-5">
           <EvidenceSection clientId={clientId} control={control} />
+        </div>
+
+        {/* Change history (from the immutable audit trail) */}
+        <div className="mt-6 border-t border-border pt-5">
+          <ChangeHistory clientId={clientId} control={control} />
         </div>
       </div>
 
@@ -521,6 +527,117 @@ function AddNoteForm({
       </div>
     </form>
   );
+}
+
+/* ================================================================== */
+/* Change history (immutable audit trail, scoped to this control)       */
+/* ================================================================== */
+function ChangeHistory({ clientId, control }: { clientId: number; control: ControlRow }) {
+  const { data, isLoading } = useQuery<AuditPage>({
+    queryKey: ['audit', clientId, control.control_id],
+    queryFn: () =>
+      auditApi.list(clientId, { entity: 'control', entity_id: control.control_id, limit: 50 }),
+  });
+
+  const entries = data?.entries ?? [];
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <History className="h-4 w-4 text-text-muted" aria-hidden="true" />
+        <h3 className="text-sm font-semibold text-text">Change history</h3>
+      </div>
+
+      {isLoading ? (
+        <Skeleton className="h-16" />
+      ) : entries.length === 0 ? (
+        <p className="text-sm text-text-muted py-1">
+          No changes recorded yet. Edits to this control will appear here.
+        </p>
+      ) : (
+        <ol className="flex flex-col gap-3">
+          {entries.map((entry) => (
+            <HistoryItem key={entry.id} entry={entry} />
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function HistoryItem({ entry }: { entry: AuditEntry }) {
+  const diff = parseControlDiff(entry.before, entry.after);
+  return (
+    <li className="border-l-2 border-border pl-3">
+      <p className="text-xs text-text-muted font-data">
+        {new Date(entry.at).toLocaleString('en-GB', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        })}
+        {entry.actor ? ` · ${entry.actor}` : ''}
+      </p>
+      <p className="text-sm text-text mt-0.5">{entry.summary}</p>
+      {diff && diff.length > 0 && (
+        <div className="flex flex-col gap-1 mt-1.5">
+          {diff.map(({ field, before, after }) => (
+            <div key={field} className="flex items-start gap-1.5 text-xs flex-wrap">
+              <span className="text-text-muted capitalize min-w-[110px]">
+                {field.replace(/_/g, ' ')}
+              </span>
+              <span className="font-data rounded px-1.5 py-0.5 bg-status-overdue-bg text-status-overdue break-all">
+                {renderHistValue(before)}
+              </span>
+              <ArrowRight className="h-3 w-3 text-text-muted shrink-0 mt-0.5" aria-hidden="true" />
+              <span className="font-data rounded px-1.5 py-0.5 bg-status-implemented-bg text-status-implemented break-all">
+                {renderHistValue(after)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </li>
+  );
+}
+
+interface ControlFieldDiff {
+  field: string;
+  before: unknown;
+  after: unknown;
+}
+
+function parseControlDiff(
+  beforeStr: string | null,
+  afterStr: string | null,
+): ControlFieldDiff[] | null {
+  const before = safeParseObj(beforeStr);
+  const after = safeParseObj(afterStr);
+  if (!before && !after) return null;
+  const fields = new Set<string>([...Object.keys(before ?? {}), ...Object.keys(after ?? {})]);
+  return [...fields].map((field) => ({
+    field,
+    before: before?.[field],
+    after: after?.[field],
+  }));
+}
+
+function safeParseObj(s: string | null): Record<string, unknown> | null {
+  if (!s) return null;
+  try {
+    const v = JSON.parse(s);
+    return v && typeof v === 'object' ? (v as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function renderHistValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '∅';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
 }
 
 function AddFileForm({
