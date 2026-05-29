@@ -25,7 +25,7 @@ import { cn } from '@/lib/utils';
 
 const PAGE_SIZE = 25;
 
-const ACTION_OPTIONS = ['all', 'create', 'update', 'delete', 'export', 'backup'] as const;
+const ACTION_OPTIONS = ['all', 'create', 'update', 'delete', 'link', 'unlink', 'export', 'backup'] as const;
 const ENTITY_OPTIONS = ['all', 'control', 'client', 'evidence', 'audit', 'database'] as const;
 
 /* Subtle, semantic-ish color per action (token-driven, AA-legible). */
@@ -33,6 +33,8 @@ const ACTION_CLASS: Record<string, string> = {
   create: 'bg-status-implemented-bg text-status-implemented',
   update: 'bg-status-progress-bg text-status-progress',
   delete: 'bg-status-overdue-bg text-status-overdue',
+  link: 'bg-surface-2 text-text',
+  unlink: 'bg-surface-2 text-text-muted',
   export: 'bg-surface-2 text-text-muted',
   backup: 'bg-surface-2 text-text-muted',
 };

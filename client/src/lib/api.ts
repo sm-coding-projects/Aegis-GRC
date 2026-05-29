@@ -16,6 +16,8 @@ import type {
   ControlUpdateInput,
   Evidence,
   EvidenceCreateInput,
+  EvidenceUpdateInput,
+  EvidenceListQuery,
   DashboardSummary,
   AuditPage,
 } from '@aegis/shared';
@@ -148,27 +150,78 @@ export const controlsApi = {
     }),
 };
 
-/* -------------------------------- Evidence ------------------------------- */
+/* ---------------------------- Evidence library --------------------------- */
+
+interface FileUploadOpts {
+  label?: string;
+  tags?: string[];
+  expires_at?: string | null;
+  control_row_ids?: number[];
+}
+
+function evidenceQs(query: EvidenceListQuery): string {
+  const params = new URLSearchParams();
+  if (query.search) params.set('search', query.search);
+  if (query.tag) params.set('tag', query.tag);
+  if (query.kind) params.set('kind', query.kind);
+  if (query.status) params.set('status', query.status);
+  const s = params.toString();
+  return s ? `?${s}` : '';
+}
+
+function evidenceFileForm(file: File, opts: FileUploadOpts): FormData {
+  const form = new FormData();
+  form.append('file', file);
+  if (opts.label) form.append('label', opts.label);
+  if (opts.tags?.length) form.append('tags', JSON.stringify(opts.tags));
+  if (opts.expires_at) form.append('expires_at', opts.expires_at);
+  if (opts.control_row_ids?.length)
+    form.append('control_row_ids', JSON.stringify(opts.control_row_ids));
+  return form;
+}
 
 export const evidenceApi = {
-  list: (clientId: number, rowId: number) =>
+  /** The engagement's full evidence library (with filters). */
+  library: (clientId: number, query: EvidenceListQuery = {}) =>
+    req<Evidence[]>(`/api/clients/${clientId}/evidence${evidenceQs(query)}`),
+  /** Distinct tags in the library (for filter dropdowns). */
+  tags: (clientId: number) => req<string[]>(`/api/clients/${clientId}/evidence/tags`),
+  /** One library item, including its linked controls. */
+  get: (clientId: number, eid: number) =>
+    req<Evidence>(`/api/clients/${clientId}/evidence/${eid}`),
+  /** Evidence linked to a specific control (the control drawer view). */
+  forControl: (clientId: number, rowId: number) =>
     req<Evidence[]>(`/api/clients/${clientId}/controls/${rowId}/evidence`),
-  addLinkOrNote: (clientId: number, rowId: number, input: EvidenceCreateInput) =>
-    req<Evidence>(`/api/clients/${clientId}/controls/${rowId}/evidence`, {
+  /** Create a link/note library item (optionally pre-linked). */
+  create: (clientId: number, input: EvidenceCreateInput) =>
+    req<Evidence>(`/api/clients/${clientId}/evidence`, { method: 'POST', body: input }),
+  /** Upload a file into the library (optionally pre-linked). */
+  uploadFile: (clientId: number, file: File, opts: FileUploadOpts = {}) =>
+    req<Evidence>(`/api/clients/${clientId}/evidence/file`, {
       method: 'POST',
-      body: input,
+      form: evidenceFileForm(file, opts),
     }),
-  addFile: (clientId: number, rowId: number, file: File, label?: string) => {
-    const form = new FormData();
-    form.append('file', file);
-    if (label) form.append('label', label);
-    return req<Evidence>(`/api/clients/${clientId}/controls/${rowId}/evidence/file`, {
+  /** Rename / retag / refresh expiry. */
+  update: (clientId: number, eid: number, patch: EvidenceUpdateInput) =>
+    req<Evidence>(`/api/clients/${clientId}/evidence/${eid}`, { method: 'PATCH', body: patch }),
+  /** Delete from the library (cascades links). */
+  remove: (clientId: number, eid: number) =>
+    req<{ ok: true }>(`/api/clients/${clientId}/evidence/${eid}`, { method: 'DELETE' }),
+  /** Link an existing library item to a control row. */
+  link: (clientId: number, eid: number, controlRowId: number) =>
+    req<Evidence>(`/api/clients/${clientId}/evidence/${eid}/links`, {
       method: 'POST',
-      form,
-    });
-  },
+      body: { control_row_id: controlRowId },
+    }),
+  /** Unlink from a control row (item stays in the library). */
+  unlink: (clientId: number, eid: number, controlRowId: number) =>
+    req<Evidence>(`/api/clients/${clientId}/evidence/${eid}/links/${controlRowId}`, {
+      method: 'DELETE',
+    }),
+  /** Force-download a file. */
   downloadUrl: (id: number) => `/api/evidence/${id}/download`,
-  remove: (id: number) => req<{ ok: true }>(`/api/evidence/${id}`, { method: 'DELETE' }),
+  /** Open a file inline (preview in a new tab). */
+  viewUrl: (id: number) => `/api/evidence/${id}/download?view=1`,
 };
 
 /* ------------------------------- Dashboard ------------------------------- */

@@ -33,7 +33,7 @@ function rowToControl(row: Row, today: string): ControlRow {
 }
 
 const SELECT_WITH_EVIDENCE = `
-  SELECT c.*, (SELECT count(*) FROM evidence e WHERE e.control_row_id = c.id) AS evidence_count
+  SELECT c.*, (SELECT count(*) FROM evidence_links l WHERE l.control_row_id = c.id) AS evidence_count
   FROM controls c
 `;
 

@@ -7,6 +7,7 @@ import { GateScreen } from '@/features/unlock/GateScreen';
 import { AppShell } from '@/components/AppShell';
 import { DashboardPage } from '@/features/dashboard/DashboardPage';
 import { ControlsPage } from '@/features/controls/ControlsPage';
+import { EvidenceLibraryPage } from '@/features/evidence/EvidenceLibraryPage';
 import { ReportsPage } from '@/features/reports/ReportsPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import { applyTheme, getInitialTheme } from '@/lib/theme';
@@ -81,6 +82,7 @@ function AppRoutes() {
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="controls" element={<ControlsPage />} />
+          <Route path="evidence" element={<EvidenceLibraryPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="settings" element={<SettingsPage />} />
           {/* catch-all */}

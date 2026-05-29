@@ -142,7 +142,7 @@ describe('phase 4 — API', () => {
     const dl = await agent.get(`/api/evidence/${fileId}/download`).expect(200);
     expect(Buffer.from(dl.body).equals(fileContent)).toBe(true);
 
-    await mutate('delete', `/api/evidence/${fileId}`).expect(200);
+    await mutate('delete', `/api/clients/${id}/evidence/${fileId}`).expect(200);
     expect((await agent.get(base)).body).toHaveLength(2);
 
     // Invalid evidence payload rejected.
@@ -184,6 +184,74 @@ describe('phase 4 — API', () => {
     expect(
       dash.body.recent_activity.some((a: { action: string }) => a.action === 'export'),
     ).toBe(true);
+  });
+
+  it('evidence library: M:N links, tags, expiry, search, link/unlink over HTTP', async () => {
+    const id = await makeClient('Evidence Co');
+    const controls = (await agent.get(`/api/clients/${id}/controls`)).body as { id: number }[];
+    const rowA = controls[0]!.id;
+    const rowB = controls[1]!.id;
+
+    // Create a library item pre-linked to two controls, with tags + expiry.
+    const created = await mutate('post', `/api/clients/${id}/evidence`)
+      .send({
+        kind: 'link',
+        label: 'SOC 2 report',
+        url: 'https://vendor.test/soc2',
+        tags: ['vendor', 'policy'],
+        expires_at: '2099-01-01',
+        control_row_ids: [rowA, rowB],
+      })
+      .expect(201);
+    const evId = created.body.id as number;
+    expect(created.body.tags).toEqual(['vendor', 'policy']);
+    expect(created.body.linked_control_count).toBe(2);
+
+    // It shows up under BOTH controls (true many-to-many).
+    expect((await agent.get(`/api/clients/${id}/controls/${rowA}/evidence`)).body).toHaveLength(1);
+    expect((await agent.get(`/api/clients/${id}/controls/${rowB}/evidence`)).body).toHaveLength(1);
+
+    // Library listing + tag filter + search.
+    expect((await agent.get(`/api/clients/${id}/evidence`)).body).toHaveLength(1);
+    expect((await agent.get(`/api/clients/${id}/evidence?tag=vendor`)).body).toHaveLength(1);
+    expect((await agent.get(`/api/clients/${id}/evidence?search=soc`)).body).toHaveLength(1);
+    expect((await agent.get(`/api/clients/${id}/evidence/tags`)).body.sort()).toEqual(['policy', 'vendor']);
+
+    // Unlink from one control; still linked to the other.
+    await mutate('delete', `/api/clients/${id}/evidence/${evId}/links/${rowA}`).expect(200);
+    expect((await agent.get(`/api/clients/${id}/controls/${rowA}/evidence`)).body).toHaveLength(0);
+    expect((await agent.get(`/api/clients/${id}/controls/${rowB}/evidence`)).body).toHaveLength(1);
+
+    // Re-link via the explicit link endpoint.
+    const relinked = await mutate('post', `/api/clients/${id}/evidence/${evId}/links`)
+      .send({ control_row_id: rowA })
+      .expect(200);
+    expect(relinked.body.linked_control_count).toBe(2);
+
+    // Update (refresh expiry + retag).
+    const patched = await mutate('patch', `/api/clients/${id}/evidence/${evId}`)
+      .send({ expires_at: '2030-06-01', tags: ['vendor'] })
+      .expect(200);
+    expect(patched.body.expires_at).toBe('2030-06-01');
+    expect(patched.body.tags).toEqual(['vendor']);
+
+    // Upload a file into the library, linked to control A.
+    const up = await agent
+      .post(`/api/clients/${id}/evidence/file`)
+      .set('x-csrf-token', csrf)
+      .field('label', 'evidence.png')
+      .field('tags', JSON.stringify(['screenshot']))
+      .field('control_row_ids', JSON.stringify([rowA]))
+      .attach('file', Buffer.from('PNGDATA'), 'evidence.png')
+      .expect(201);
+    expect(up.body.tags).toEqual(['screenshot']);
+    expect(up.body.linked_control_count).toBe(1);
+    const dl = await agent.get(`/api/evidence/${up.body.id}/download`).expect(200);
+    expect(Buffer.from(dl.body).toString()).toBe('PNGDATA');
+
+    // Delete from library; gone everywhere.
+    await mutate('delete', `/api/clients/${id}/evidence/${evId}`).expect(200);
+    expect((await agent.get(`/api/clients/${id}/evidence`)).body).toHaveLength(1); // only the file remains
   });
 
   it('audit trail: records before/after + actor/ip, lists, filters, and exports CSV/JSON', async () => {

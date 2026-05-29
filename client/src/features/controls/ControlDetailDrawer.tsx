@@ -3,10 +3,17 @@ import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { X, Link2, FileText, File, Download, Trash2, Plus, History, ArrowRight } from 'lucide-react';
+import { X, Plus, History, ArrowRight, Unlink, FolderOpen } from 'lucide-react';
 import { controlUpdateSchema, STATUS_LABELS, STATUSES } from '@aegis/shared';
 import type { ControlRow, ControlUpdateInput, Evidence, AuditEntry, AuditPage } from '@aegis/shared';
 import { controlsApi, evidenceApi, auditApi, ApiError } from '@/lib/api';
+import {
+  EvidenceThumbnail,
+  ExpiryBadge,
+  TagChip,
+  EvidenceFormDialog,
+  EvidencePreviewDialog,
+} from '@/features/evidence/components';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -289,243 +296,172 @@ function DrawerContent({
 }
 
 /* ================================================================== */
-/* Evidence section                                                     */
+/* Evidence section — linked library items (M:N)                        */
 /* ================================================================== */
-type EvidenceMode = 'none' | 'add-link' | 'add-note' | 'add-file';
-
 function EvidenceSection({ clientId, control }: { clientId: number; control: ControlRow }) {
   const queryClient = useQueryClient();
-  const [mode, setMode] = React.useState<EvidenceMode>('none');
+  const [addOpen, setAddOpen] = React.useState(false);
+  const [preview, setPreview] = React.useState<Evidence | null>(null);
+  const [editing, setEditing] = React.useState<Evidence | null>(null);
+  const [linkPick, setLinkPick] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
 
-  const { data: evidenceList, isLoading } = useQuery<Evidence[]>({
+  const { data: linked = [], isLoading } = useQuery<Evidence[]>({
     queryKey: ['evidence', clientId, control.id],
-    queryFn: () => evidenceApi.list(clientId, control.id),
+    queryFn: () => evidenceApi.forControl(clientId, control.id),
+  });
+
+  // The library, to offer "link existing" items not already attached here.
+  const { data: library = [] } = useQuery<Evidence[]>({
+    queryKey: ['evidence-library', clientId, {}],
+    queryFn: () => evidenceApi.library(clientId),
   });
 
   const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: ['evidence', clientId, control.id] });
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['evidence', clientId] }),
+      queryClient.invalidateQueries({ queryKey: ['evidence-library', clientId] }),
+      queryClient.invalidateQueries({ queryKey: ['controls', clientId] }),
+      queryClient.invalidateQueries({ queryKey: ['dashboard', clientId] }),
+      queryClient.invalidateQueries({ queryKey: ['audit'] }),
+    ]);
 
-  const handleDeleteEvidence = async (id: number) => {
+  const linkedIds = new Set(linked.map((e) => e.id));
+  const linkable = library.filter((e) => !linkedIds.has(e.id));
+
+  const handleLinkExisting = async (eid: number) => {
+    setBusy(true);
     try {
-      await evidenceApi.remove(id);
+      await evidenceApi.link(clientId, eid, control.id);
       await invalidate();
-      toast.success('Evidence removed.');
+      setLinkPick('');
+      toast.success('Evidence linked.');
     } catch {
-      toast.error('Failed to remove evidence.');
+      toast.error('Failed to link evidence.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleUnlink = async (eid: number) => {
+    setBusy(true);
+    try {
+      await evidenceApi.unlink(clientId, eid, control.id);
+      await invalidate();
+      toast.success('Evidence unlinked from this control.');
+    } catch {
+      toast.error('Failed to unlink.');
+    } finally {
+      setBusy(false);
     }
   };
 
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-text">Evidence</h3>
-        {mode === 'none' && (
-          <div className="flex items-center gap-1">
-            <Button variant="ghost" size="sm" onClick={() => setMode('add-link')} className="text-xs">
-              <Link2 className="h-3.5 w-3.5" aria-hidden="true" /> Link
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setMode('add-note')} className="text-xs">
-              <FileText className="h-3.5 w-3.5" aria-hidden="true" /> Note
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setMode('add-file')} className="text-xs">
-              <File className="h-3.5 w-3.5" aria-hidden="true" /> File
-            </Button>
-          </div>
-        )}
+        <h3 className="text-sm font-semibold text-text">
+          Evidence <span className="text-text-muted font-normal">({linked.length})</span>
+        </h3>
+        <Button variant="ghost" size="sm" onClick={() => setAddOpen(true)} className="text-xs">
+          <Plus className="h-3.5 w-3.5" aria-hidden="true" /> Add
+        </Button>
       </div>
 
-      {/* Add forms */}
-      {mode === 'add-link' && (
-        <AddLinkForm
-          clientId={clientId}
-          controlId={control.id}
-          onDone={() => { setMode('none'); void invalidate(); }}
-          onCancel={() => setMode('none')}
-        />
-      )}
-      {mode === 'add-note' && (
-        <AddNoteForm
-          clientId={clientId}
-          controlId={control.id}
-          onDone={() => { setMode('none'); void invalidate(); }}
-          onCancel={() => setMode('none')}
-        />
-      )}
-      {mode === 'add-file' && (
-        <AddFileForm
-          clientId={clientId}
-          controlId={control.id}
-          onDone={() => { setMode('none'); void invalidate(); }}
-          onCancel={() => setMode('none')}
-        />
+      {/* Link an existing library item */}
+      {linkable.length > 0 && (
+        <div className="mb-3">
+          <Select value={linkPick} onValueChange={(v) => v && void handleLinkExisting(Number(v))}>
+            <SelectTrigger className="h-9 text-xs" aria-label="Link existing evidence" disabled={busy}>
+              <SelectValue placeholder="Link existing evidence from the library…" />
+            </SelectTrigger>
+            <SelectContent className="max-h-72">
+              {linkable.map((e) => (
+                <SelectItem key={e.id} value={String(e.id)}>
+                  <span className="capitalize text-text-muted mr-2">{e.kind}</span>
+                  {e.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       )}
 
-      {/* Evidence list */}
+      {/* Linked evidence list */}
       {isLoading ? (
         <Skeleton className="h-16 mt-2" />
-      ) : evidenceList && evidenceList.length > 0 ? (
-        <ul className="flex flex-col gap-2 mt-2">
-          {evidenceList.map((ev) => (
-            <EvidenceItem key={ev.id} evidence={ev} onDelete={() => void handleDeleteEvidence(ev.id)} />
+      ) : linked.length > 0 ? (
+        <ul className="flex flex-col gap-2">
+          {linked.map((ev) => (
+            <li
+              key={ev.id}
+              className="flex items-start gap-2.5 p-2.5 rounded-md border border-border bg-surface-2 group"
+            >
+              <button
+                onClick={() => setPreview(ev)}
+                className="flex items-start gap-2.5 flex-1 min-w-0 text-left"
+                aria-label={`Preview ${ev.label}`}
+              >
+                <EvidenceThumbnail evidence={ev} size={36} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-text truncate">{ev.label}</p>
+                  <div className="flex flex-wrap items-center gap-1 mt-1">
+                    {ev.tags.slice(0, 3).map((t) => (
+                      <TagChip key={t}>{t}</TagChip>
+                    ))}
+                    <ExpiryBadge evidence={ev} />
+                  </div>
+                </div>
+              </button>
+              <button
+                onClick={() => void handleUnlink(ev.id)}
+                disabled={busy}
+                className="p-1 rounded text-text-muted hover:text-destructive hover:bg-surface transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50"
+                aria-label={`Unlink ${ev.label} from this control`}
+                title="Unlink from this control"
+              >
+                <Unlink className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </li>
           ))}
         </ul>
       ) : (
-        mode === 'none' && (
-          <p className="text-sm text-text-muted py-2">
-            No evidence yet.{' '}
-            <button
-              onClick={() => setMode('add-link')}
-              className="text-accent hover:underline"
-            >
-              Add a link
-            </button>{' '}
-            to get started.
-          </p>
-        )
+        <p className="text-sm text-text-muted py-2 flex items-center gap-1.5">
+          <FolderOpen className="h-4 w-4" aria-hidden="true" />
+          No evidence linked yet.{' '}
+          <button onClick={() => setAddOpen(true)} className="text-accent hover:underline">
+            Add some
+          </button>
+          .
+        </p>
       )}
+
+      {/* Create new (auto-linked to this control) */}
+      <EvidenceFormDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        clientId={clientId}
+        linkToControlRowId={control.id}
+        onSaved={() => void invalidate()}
+      />
+      {/* Edit (from preview) */}
+      <EvidenceFormDialog
+        open={editing != null}
+        onOpenChange={(o) => !o && setEditing(null)}
+        clientId={clientId}
+        editing={editing}
+        onSaved={() => void invalidate()}
+      />
+      {/* Preview */}
+      <EvidencePreviewDialog
+        evidence={preview}
+        clientId={clientId}
+        onOpenChange={(o) => !o && setPreview(null)}
+        onEdit={(ev) => {
+          setPreview(null);
+          setEditing(ev);
+        }}
+      />
     </div>
-  );
-}
-
-function EvidenceItem({ evidence, onDelete }: { evidence: Evidence; onDelete: () => void }) {
-  const kindIcon = {
-    link: <Link2 className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden="true" />,
-    note: <FileText className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden="true" />,
-    file: <File className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden="true" />,
-  }[evidence.kind];
-
-  return (
-    <li className="flex items-start gap-2 p-3 rounded-md border border-border bg-surface-2 group">
-      {kindIcon}
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-text truncate">{evidence.label}</p>
-        {evidence.url && (
-          <a
-            href={evidence.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-accent hover:underline truncate block"
-          >
-            {evidence.url}
-          </a>
-        )}
-        {evidence.text && (
-          <p className="text-xs text-text-muted mt-0.5 line-clamp-2">{evidence.text}</p>
-        )}
-        {evidence.kind === 'file' && evidence.size && (
-          <p className="text-xs text-text-muted mt-0.5">
-            {(evidence.size / 1024).toFixed(1)} KB
-          </p>
-        )}
-      </div>
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-        {evidence.kind === 'file' && (
-          <a
-            href={evidenceApi.downloadUrl(evidence.id)}
-            download={evidence.label}
-            className="p-1 rounded text-text-muted hover:text-text hover:bg-surface transition-colors"
-            aria-label={`Download ${evidence.label}`}
-          >
-            <Download className="h-3.5 w-3.5" aria-hidden="true" />
-          </a>
-        )}
-        <button
-          onClick={onDelete}
-          className="p-1 rounded text-text-muted hover:text-destructive hover:bg-surface transition-colors"
-          aria-label={`Delete ${evidence.label}`}
-        >
-          <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-      </div>
-    </li>
-  );
-}
-
-function AddLinkForm({
-  clientId,
-  controlId,
-  onDone,
-  onCancel,
-}: {
-  clientId: number;
-  controlId: number;
-  onDone: () => void;
-  onCancel: () => void;
-}) {
-  const [label, setLabel] = React.useState('');
-  const [url, setUrl] = React.useState('');
-  const [isSubmitting, setIsSubmitting] = React.useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!label || !url) return;
-    setIsSubmitting(true);
-    try {
-      await evidenceApi.addLinkOrNote(clientId, controlId, { kind: 'link', label, url });
-      toast.success('Link added.');
-      onDone();
-    } catch {
-      toast.error('Failed to add link.');
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-2 p-3 rounded-md border border-border bg-surface-2 mb-3">
-      <p className="text-xs font-semibold text-text">Add link</p>
-      <Input placeholder="Label" value={label} onChange={(e) => setLabel(e.target.value)} />
-      <Input placeholder="https://..." type="url" value={url} onChange={(e) => setUrl(e.target.value)} />
-      <div className="flex gap-2 mt-1">
-        <Button type="button" variant="secondary" size="sm" onClick={onCancel}>Cancel</Button>
-        <Button type="submit" variant="primary" size="sm" loading={isSubmitting} disabled={!label || !url}>
-          <Plus className="h-3.5 w-3.5" aria-hidden="true" /> Add
-        </Button>
-      </div>
-    </form>
-  );
-}
-
-function AddNoteForm({
-  clientId,
-  controlId,
-  onDone,
-  onCancel,
-}: {
-  clientId: number;
-  controlId: number;
-  onDone: () => void;
-  onCancel: () => void;
-}) {
-  const [label, setLabel] = React.useState('');
-  const [text, setText] = React.useState('');
-  const [isSubmitting, setIsSubmitting] = React.useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!label || !text) return;
-    setIsSubmitting(true);
-    try {
-      await evidenceApi.addLinkOrNote(clientId, controlId, { kind: 'note', label, text });
-      toast.success('Note added.');
-      onDone();
-    } catch {
-      toast.error('Failed to add note.');
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-2 p-3 rounded-md border border-border bg-surface-2 mb-3">
-      <p className="text-xs font-semibold text-text">Add note</p>
-      <Input placeholder="Label" value={label} onChange={(e) => setLabel(e.target.value)} />
-      <Textarea placeholder="Note content…" rows={3} value={text} onChange={(e) => setText(e.target.value)} />
-      <div className="flex gap-2 mt-1">
-        <Button type="button" variant="secondary" size="sm" onClick={onCancel}>Cancel</Button>
-        <Button type="submit" variant="primary" size="sm" loading={isSubmitting} disabled={!label || !text}>
-          <Plus className="h-3.5 w-3.5" aria-hidden="true" /> Add
-        </Button>
-      </div>
-    </form>
   );
 }
 
@@ -638,53 +574,4 @@ function renderHistValue(value: unknown): string {
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
-}
-
-function AddFileForm({
-  clientId,
-  controlId,
-  onDone,
-  onCancel,
-}: {
-  clientId: number;
-  controlId: number;
-  onDone: () => void;
-  onCancel: () => void;
-}) {
-  const [file, setFile] = React.useState<File | null>(null);
-  const [label, setLabel] = React.useState('');
-  const [isSubmitting, setIsSubmitting] = React.useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!file) return;
-    setIsSubmitting(true);
-    try {
-      await evidenceApi.addFile(clientId, controlId, file, label || undefined);
-      toast.success('File uploaded.');
-      onDone();
-    } catch {
-      toast.error('Failed to upload file.');
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-2 p-3 rounded-md border border-border bg-surface-2 mb-3">
-      <p className="text-xs font-semibold text-text">Upload file</p>
-      <Input placeholder="Label (optional)" value={label} onChange={(e) => setLabel(e.target.value)} />
-      <input
-        type="file"
-        onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-        className="text-sm text-text file:mr-2 file:rounded file:border file:border-border file:bg-surface file:px-2 file:py-1 file:text-xs file:font-medium file:text-text file:cursor-pointer hover:file:bg-surface-2"
-        aria-label="Select file to upload"
-      />
-      <div className="flex gap-2 mt-1">
-        <Button type="button" variant="secondary" size="sm" onClick={onCancel}>Cancel</Button>
-        <Button type="submit" variant="primary" size="sm" loading={isSubmitting} disabled={!file}>
-          <Plus className="h-3.5 w-3.5" aria-hidden="true" /> Upload
-        </Button>
-      </div>
-    </form>
-  );
 }
