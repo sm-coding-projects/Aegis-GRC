@@ -44,6 +44,12 @@ all your data (including uploaded evidence files) is right there.
   **link many-to-many** to controls (one SOC 2 report can satisfy ten controls),
   give an **expiry date** so stale evidence is surfaced and refreshed, and
   **preview** (image thumbnails) or download without leaving the page.
+- ⚡ **Bulk operations & templates** — select a whole Annex A theme (or any set of
+  controls) and edit them in one pass — e.g. mark all of §A.8 *not applicable*
+  with a single justification when the client is a pure-SaaS vendor. Save an
+  engagement's applicability decisions as a reusable **template** (a "SaaS vendor
+  baseline", "healthcare tight"…) and apply it to new engagements in one click.
+  Every bulk change and template apply is captured in the audit trail.
 - 📜 **Immutable audit trail** — every change to a control, evidence item, or
   engagement is recorded with timestamp, actor, IP, and a field-level
   before→after diff. The log is append-only (enforced by database triggers) and

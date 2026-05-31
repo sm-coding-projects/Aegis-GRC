@@ -306,6 +306,139 @@ describe('phase 4 — API', () => {
     await agent.get(`/api/clients/${id}/audit?bogus=1`).expect(400);
   });
 
+  it('bulk update: marks a whole theme not-applicable with one justification', async () => {
+    const id = await makeClient('Bulk Co');
+    const tech = (await agent.get(`/api/clients/${id}/controls?theme=A.8`).expect(200))
+      .body as { id: number; applicable: boolean }[];
+    expect(tech).toHaveLength(34);
+    const ids = tech.map((c) => c.id);
+
+    const res = await mutate('patch', `/api/clients/${id}/controls/bulk`)
+      .send({
+        control_row_ids: ids,
+        patch: { applicable: false, applicability_justification: 'Fully outsourced to SaaS provider' },
+      })
+      .expect(200);
+    expect(res.body.updated).toBe(34);
+    expect(res.body.controls.every((c: { applicable: boolean }) => c.applicable === false)).toBe(true);
+
+    // Persisted: the whole theme is now not-applicable.
+    const after = (await agent.get(`/api/clients/${id}/controls?theme=A.8&applicable=false`).expect(200))
+      .body as unknown[];
+    expect(after).toHaveLength(34);
+
+    // Each changed control was audited individually.
+    const audit = await agent
+      .get(`/api/clients/${id}/audit?action=update&entity=control&limit=500`)
+      .expect(200);
+    expect(audit.body.total).toBeGreaterThanOrEqual(34);
+
+    // The "bulk" path segment is not mistaken for a row id.
+    await agent.get(`/api/clients/${id}/controls/bulk`).expect(400);
+  });
+
+  it('bulk update: rejects empty id list, empty patch, and unknown fields', async () => {
+    const id = await makeClient();
+    const rowId = (await agent.get(`/api/clients/${id}/controls`)).body[0].id as number;
+    await mutate('patch', `/api/clients/${id}/controls/bulk`)
+      .send({ control_row_ids: [], patch: { applicable: false } })
+      .expect(400); // min(1)
+    await mutate('patch', `/api/clients/${id}/controls/bulk`)
+      .send({ control_row_ids: [rowId], patch: { status: 'banana' } })
+      .expect(400); // bad enum
+    await mutate('patch', `/api/clients/${id}/controls/bulk`)
+      .send({ control_row_ids: [rowId], patch: { nope: 1 } })
+      .expect(400); // unknown field (strict)
+  });
+
+  it('templates: save a baseline from one engagement and apply it to another', async () => {
+    // Source engagement: mark all of A.8 not-applicable, then save as a template.
+    const src = await makeClient('SaaS Vendor A');
+    const tech = (await agent.get(`/api/clients/${src}/controls?theme=A.8`)).body as { id: number }[];
+    await mutate('patch', `/api/clients/${src}/controls/bulk`)
+      .send({
+        control_row_ids: tech.map((c) => c.id),
+        patch: { applicable: false, applicability_justification: 'Outsourced to SaaS' },
+      })
+      .expect(200);
+
+    const created = await mutate('post', '/api/templates')
+      .send({ name: 'SaaS vendor baseline', description: 'A.8 outsourced', from_client_id: src })
+      .expect(201);
+    const templateId = created.body.id as number;
+    expect(created.body.item_count).toBe(93);
+
+    // It appears in the list and its items are retrievable.
+    expect((await agent.get('/api/templates')).body).toHaveLength(1);
+    const full = await agent.get(`/api/templates/${templateId}`).expect(200);
+    expect(full.body.items).toHaveLength(93);
+    const a8Items = (full.body.items as { control_id: string; applicable: boolean }[]).filter((i) =>
+      i.control_id.startsWith('A.8'),
+    );
+    expect(a8Items.every((i) => i.applicable === false)).toBe(true);
+
+    // Duplicate name is rejected (409).
+    await mutate('post', '/api/templates')
+      .send({ name: 'SaaS vendor baseline', from_client_id: src })
+      .expect(409);
+
+    // Apply to a brand-new engagement (starts all-applicable).
+    const dst = await makeClient('SaaS Vendor B');
+    expect(
+      ((await agent.get(`/api/clients/${dst}/controls?theme=A.8&applicable=false`)).body as unknown[]).length,
+    ).toBe(0);
+
+    const applied = await mutate('post', `/api/clients/${dst}/templates/${templateId}/apply`)
+      .send({})
+      .expect(200);
+    expect(applied.body.applied).toBe(93);
+
+    // A.8 is now not-applicable on the destination too.
+    expect(
+      ((await agent.get(`/api/clients/${dst}/controls?theme=A.8&applicable=false`)).body as unknown[]).length,
+    ).toBe(34);
+
+    // Apply was audited on the destination engagement.
+    const audit = await agent.get(`/api/clients/${dst}/audit?entity=template&action=apply`).expect(200);
+    expect(audit.body.total).toBe(1);
+
+    // Rename, then delete.
+    await mutate('patch', `/api/templates/${templateId}`).send({ name: 'SaaS baseline v2' }).expect(200);
+    expect((await agent.get(`/api/templates/${templateId}`)).body.name).toBe('SaaS baseline v2');
+    await mutate('delete', `/api/templates/${templateId}`).expect(200);
+    await agent.get(`/api/templates/${templateId}`).expect(404);
+  });
+
+  it('templates: apply can be scoped to a single theme', async () => {
+    const src = await makeClient('Theme Source');
+    const all = (await agent.get(`/api/clients/${src}/controls`)).body as { id: number; theme_id: string }[];
+    // Mark everything not-applicable on the source.
+    await mutate('patch', `/api/clients/${src}/controls/bulk`)
+      .send({ control_row_ids: all.map((c) => c.id), patch: { applicable: false } })
+      .expect(200);
+    const tpl = await mutate('post', '/api/templates')
+      .send({ name: 'Everything off', from_client_id: src })
+      .expect(201);
+
+    const dst = await makeClient('Theme Target');
+    // Apply only the A.6 slice (8 controls).
+    const res = await mutate('post', `/api/clients/${dst}/templates/${tpl.body.id}/apply`)
+      .send({ theme: 'A.6' })
+      .expect(200);
+    expect(res.body.applied).toBe(8);
+    expect(
+      ((await agent.get(`/api/clients/${dst}/controls?applicable=false`)).body as unknown[]).length,
+    ).toBe(8);
+  });
+
+  it('templates: 404s for a missing source engagement or template', async () => {
+    await mutate('post', '/api/templates')
+      .send({ name: 'Orphan', from_client_id: 99999 })
+      .expect(404);
+    const id = await makeClient();
+    await mutate('post', `/api/clients/${id}/templates/99999/apply`).send({}).expect(404);
+  });
+
   it('backup downloads an encrypted file that re-opens with the password and has the data', async () => {
     const id = await makeClient('Backup Target');
     // Add a control update + evidence so there is data to verify post-restore.
