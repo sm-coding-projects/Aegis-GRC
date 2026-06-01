@@ -224,8 +224,8 @@ describe('evidence library — migration from v2 (old 1:N schema)', () => {
         )
         .run(rows[1]!.id, 'Legacy note', 'some note', '2025-02-01T00:00:00.000Z');
 
-      // Now apply the v3 library migration.
-      migrate(v2db);
+      // Now apply the v3 library migration (in isolation, up to v3).
+      migrate(v2db, 3);
       expect(Number(v2db.pragma('user_version', { simple: true }))).toBe(3);
 
       // Both pieces survived, gained client_id, and got one link each.

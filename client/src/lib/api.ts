@@ -14,6 +14,13 @@ import type {
   ClientUpdateInput,
   ControlRow,
   ControlUpdateInput,
+  BulkControlUpdateInput,
+  BulkUpdateResult,
+  ControlTemplate,
+  TemplateCreateInput,
+  TemplateUpdateInput,
+  TemplateApplyInput,
+  TemplateApplyResult,
   Evidence,
   EvidenceCreateInput,
   EvidenceUpdateInput,
@@ -147,6 +154,35 @@ export const controlsApi = {
     req<ControlRow>(`/api/clients/${clientId}/controls/${rowId}`, {
       method: 'PATCH',
       body: patch,
+    }),
+  /** Apply one patch to many control rows at once. */
+  bulkUpdate: (clientId: number, input: BulkControlUpdateInput) =>
+    req<BulkUpdateResult>(`/api/clients/${clientId}/controls/bulk`, {
+      method: 'PATCH',
+      body: input,
+    }),
+};
+
+/* ---------------------------- Control templates -------------------------- */
+
+export const templatesApi = {
+  /** All saved templates (with item counts). */
+  list: () => req<ControlTemplate[]>('/api/templates'),
+  /** One template, including its per-control decisions. */
+  get: (id: number) => req<ControlTemplate>(`/api/templates/${id}`),
+  /** Save an engagement's current applicability as a reusable template. */
+  create: (input: TemplateCreateInput) =>
+    req<ControlTemplate>('/api/templates', { method: 'POST', body: input }),
+  /** Rename / re-describe a template. */
+  update: (id: number, input: TemplateUpdateInput) =>
+    req<ControlTemplate>(`/api/templates/${id}`, { method: 'PATCH', body: input }),
+  /** Delete a template. */
+  remove: (id: number) => req<{ ok: true }>(`/api/templates/${id}`, { method: 'DELETE' }),
+  /** Apply a template's decisions to an engagement (optionally one theme). */
+  apply: (clientId: number, templateId: number, input: TemplateApplyInput = {}) =>
+    req<TemplateApplyResult>(`/api/clients/${clientId}/templates/${templateId}/apply`, {
+      method: 'POST',
+      body: input,
     }),
 };
 
