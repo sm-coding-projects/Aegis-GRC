@@ -178,6 +178,36 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 4,
+    name: 'control templates (reusable applicability baselines)',
+    up: (db) => {
+      // A template stores an applicability decision per control so a consultant
+      // can save a baseline (e.g. "SaaS vendor baseline") and apply it to new
+      // engagements. Templates are global — not scoped to a client — but live in
+      // the same single encrypted file as everything else.
+      db.exec(`
+        CREATE TABLE templates (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          name        TEXT NOT NULL UNIQUE,
+          description TEXT,
+          created_at  TEXT NOT NULL,
+          updated_at  TEXT NOT NULL
+        );
+
+        CREATE TABLE template_items (
+          id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+          template_id                 INTEGER NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
+          control_id                  TEXT NOT NULL,
+          applicable                  INTEGER NOT NULL DEFAULT 1 CHECK (applicable IN (0, 1)),
+          applicability_justification TEXT,
+          UNIQUE (template_id, control_id)
+        );
+
+        CREATE INDEX idx_template_items_template ON template_items (template_id);
+      `);
+    },
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = migrations[migrations.length - 1]!.version;

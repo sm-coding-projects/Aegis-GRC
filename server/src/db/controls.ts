@@ -99,7 +99,7 @@ export function updateControl(
   db: DB,
   clientId: number,
   controlRowId: number,
-  patch: ControlUpdateInput,
+  patch: Partial<ControlUpdateInput>,
 ): ControlRow | undefined {
   const existing = getControl(db, clientId, controlRowId);
   if (!existing) return undefined;
@@ -139,6 +139,29 @@ export function updateControl(
   });
 
   return getControl(db, clientId, controlRowId);
+}
+
+/**
+ * Apply one partial patch to many control rows at once (e.g. mark a whole theme
+ * not-applicable). Runs in a single transaction; each row that actually changes
+ * gets its own audit entry via updateControl, keeping the trail granular.
+ * Returns the updated rows (rows that don't belong to the client are skipped).
+ */
+export function bulkUpdateControls(
+  db: DB,
+  clientId: number,
+  controlRowIds: number[],
+  patch: ControlUpdateInput,
+): ControlRow[] {
+  const tx = db.transaction(() => {
+    const updated: ControlRow[] = [];
+    for (const rowId of controlRowIds) {
+      const row = updateControl(db, clientId, rowId, patch);
+      if (row) updated.push(row);
+    }
+    return updated;
+  });
+  return tx();
 }
 
 /** Distinct owners for a client (for the controls table owner filter). */

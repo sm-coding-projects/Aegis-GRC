@@ -5,6 +5,10 @@ import {
   clientUpdateSchema,
   controlUpdateSchema,
   controlListQuerySchema,
+  bulkControlUpdateSchema,
+  templateCreateSchema,
+  templateUpdateSchema,
+  templateApplySchema,
   evidenceCreateSchema,
   evidenceUpdateSchema,
   evidenceLinkControlSchema,
@@ -20,7 +24,23 @@ import {
   updateClient,
   deleteClient,
 } from '../db/clients';
-import { listControls, getControl, updateControl, listOwners } from '../db/controls';
+import {
+  listControls,
+  getControl,
+  updateControl,
+  bulkUpdateControls,
+  listOwners,
+} from '../db/controls';
+import {
+  listTemplates,
+  getTemplate,
+  getTemplateByName,
+  getTemplateWithItems,
+  createTemplate,
+  updateTemplate,
+  deleteTemplate,
+  applyTemplate,
+} from '../db/templates';
 import {
   listLibrary,
   getEvidenceForClient,
@@ -113,6 +133,18 @@ export function makeApiRouter(ctx: AppContext): Router {
     res.json(listOwners(req.db!, id));
   });
 
+  // Bulk-edit many control rows at once (registered BEFORE the :controlRowId
+  // route so "bulk" isn't mistaken for a row id).
+  router.patch('/clients/:clientId/controls/bulk', (req: Request, res: Response) => {
+    const id = intParam(req.params.clientId);
+    if (!id) return badRequest(res);
+    if (!getClient(req.db!, id)) return void res.status(404).json({ error: 'Client not found' });
+    const parsed = bulkControlUpdateSchema.safeParse(req.body);
+    if (!parsed.success) return badRequest(res, parsed.error.flatten());
+    const controls = bulkUpdateControls(req.db!, id, parsed.data.control_row_ids, parsed.data.patch);
+    res.json({ updated: controls.length, controls });
+  });
+
   router.get('/clients/:clientId/controls/:controlRowId', (req: Request, res: Response) => {
     const clientId = intParam(req.params.clientId);
     const controlRowId = intParam(req.params.controlRowId);
@@ -132,6 +164,77 @@ export function makeApiRouter(ctx: AppContext): Router {
     if (!control) return void res.status(404).json({ error: 'Control not found' });
     res.json(control);
   });
+
+  /* --------------------------- Control templates -------------------------- */
+
+  // List all templates (global, with item counts).
+  router.get('/templates', (req: Request, res: Response) => {
+    res.json(listTemplates(req.db!));
+  });
+
+  // Create a template by snapshotting an engagement's applicability decisions.
+  router.post('/templates', (req: Request, res: Response) => {
+    const parsed = templateCreateSchema.safeParse(req.body);
+    if (!parsed.success) return badRequest(res, parsed.error.flatten());
+    if (!getClient(req.db!, parsed.data.from_client_id))
+      return void res.status(404).json({ error: 'Source engagement not found' });
+    if (getTemplateByName(req.db!, parsed.data.name))
+      return void res.status(409).json({ error: 'A template with that name already exists' });
+    const template = createTemplate(req.db!, parsed.data);
+    if (!template) return void res.status(404).json({ error: 'Source engagement not found' });
+    res.status(201).json(template);
+  });
+
+  // One template, including its stored per-control decisions.
+  router.get('/templates/:templateId', (req: Request, res: Response) => {
+    const id = intParam(req.params.templateId);
+    if (!id) return badRequest(res);
+    const template = getTemplateWithItems(req.db!, id);
+    if (!template) return void res.status(404).json({ error: 'Template not found' });
+    res.json(template);
+  });
+
+  // Rename / re-describe a template.
+  router.patch('/templates/:templateId', (req: Request, res: Response) => {
+    const id = intParam(req.params.templateId);
+    if (!id) return badRequest(res);
+    const parsed = templateUpdateSchema.safeParse(req.body);
+    if (!parsed.success) return badRequest(res, parsed.error.flatten());
+    if (!getTemplate(req.db!, id)) return void res.status(404).json({ error: 'Template not found' });
+    if (parsed.data.name) {
+      const clash = getTemplateByName(req.db!, parsed.data.name);
+      if (clash && clash.id !== id)
+        return void res.status(409).json({ error: 'A template with that name already exists' });
+    }
+    const template = updateTemplate(req.db!, id, parsed.data);
+    res.json(template);
+  });
+
+  // Delete a template (cascades its items).
+  router.delete('/templates/:templateId', (req: Request, res: Response) => {
+    const id = intParam(req.params.templateId);
+    if (!id) return badRequest(res);
+    if (!deleteTemplate(req.db!, id))
+      return void res.status(404).json({ error: 'Template not found' });
+    res.json({ ok: true });
+  });
+
+  // Apply a template's decisions to an engagement (optionally one theme).
+  router.post(
+    '/clients/:clientId/templates/:templateId/apply',
+    (req: Request, res: Response) => {
+      const clientId = intParam(req.params.clientId);
+      const templateId = intParam(req.params.templateId);
+      if (!clientId || !templateId) return badRequest(res);
+      if (!getClient(req.db!, clientId))
+        return void res.status(404).json({ error: 'Client not found' });
+      const parsed = templateApplySchema.safeParse(req.body ?? {});
+      if (!parsed.success) return badRequest(res, parsed.error.flatten());
+      const result = applyTemplate(req.db!, clientId, templateId, parsed.data);
+      if (!result) return void res.status(404).json({ error: 'Template not found' });
+      res.json(result);
+    },
+  );
 
   /* --------------------------- Evidence library --------------------------- */
 

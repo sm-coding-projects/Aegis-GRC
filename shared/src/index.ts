@@ -180,6 +180,93 @@ export const controlListQuerySchema = z
 export type ControlListQuery = z.infer<typeof controlListQuerySchema>;
 
 /* ------------------------------------------------------------------ *
+ * Bulk control operations
+ * ------------------------------------------------------------------ *
+ * Apply one partial patch to many control rows at once — e.g. mark a whole
+ * Annex A theme not-applicable with a single justification. The patch reuses
+ * `controlUpdateSchema` (same fields, same validation, same non-empty rule),
+ * so client and server agree on exactly what a bulk edit may change.
+ */
+export const bulkControlUpdateSchema = z
+  .object({
+    control_row_ids: z.array(z.number().int().positive()).min(1).max(TOTAL_CONTROLS),
+    patch: controlUpdateSchema,
+  })
+  .strict();
+export type BulkControlUpdateInput = z.infer<typeof bulkControlUpdateSchema>;
+
+/** Result of a bulk control update. */
+export interface BulkUpdateResult {
+  /** Number of control rows that matched and were updated. */
+  updated: number;
+  /** The updated control rows (so the client can refresh its cache). */
+  controls: ControlRow[];
+}
+
+/* ------------------------------------------------------------------ *
+ * Control templates (reusable applicability baselines)
+ * ------------------------------------------------------------------ *
+ * A template captures an applicability decision per control — which controls
+ * apply and the justification — so a consultant can save, e.g., a "SaaS vendor
+ * baseline" once and apply it to every new SaaS engagement. Templates are
+ * global (shared across engagements) and live in the single encrypted file.
+ * Templates intentionally do NOT capture engagement-specific data (status,
+ * owner, dates): those are progress, not a reusable baseline.
+ */
+export interface ControlTemplateItem {
+  control_id: string; // e.g. "A.8.24"
+  applicable: boolean;
+  applicability_justification: string | null;
+}
+
+export interface ControlTemplate {
+  id: number;
+  name: string;
+  description: string | null;
+  /** Number of control decisions stored in this template. */
+  item_count: number;
+  created_at: string;
+  updated_at: string;
+  /** Populated on the single-template view; omitted in list views. */
+  items?: ControlTemplateItem[];
+}
+
+/** Create a template by snapshotting an existing engagement's applicability. */
+export const templateCreateSchema = z
+  .object({
+    name: trimmedNonEmpty(120),
+    description: trimmedOptional(2000),
+    /** The engagement whose applicability decisions are captured. */
+    from_client_id: z.number().int().positive(),
+  })
+  .strict();
+export type TemplateCreateInput = z.infer<typeof templateCreateSchema>;
+
+/** Rename a template or edit its description. */
+export const templateUpdateSchema = z
+  .object({
+    name: trimmedNonEmpty(120).optional(),
+    description: trimmedOptional(2000),
+  })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update' });
+export type TemplateUpdateInput = z.infer<typeof templateUpdateSchema>;
+
+/** Apply a template to an engagement, optionally scoped to a single theme. */
+export const templateApplySchema = z
+  .object({
+    theme: z.enum(THEME_IDS).optional(),
+  })
+  .strict();
+export type TemplateApplyInput = z.infer<typeof templateApplySchema>;
+
+/** Result of applying a template. */
+export interface TemplateApplyResult {
+  /** Number of control rows the template touched (matched by control_id). */
+  applied: number;
+}
+
+/* ------------------------------------------------------------------ *
  * Evidence library (engagement-scoped, M:N linked to controls)
  * ------------------------------------------------------------------ */
 
